@@ -10,6 +10,9 @@ November 29 2021
 3. Run the command "dotnet fsi Client.fsx client_IP_address port client_ID number_of_users number_of_clients server_IP_address" on each client.
 
 For example, to simulate 1000 users running on three clients, run the commands:
+
   dotnet fsi Client.fsx client_1_IP_address port 1 1000 3 server_IP_address
+  
   dotnet fsi Client.fsx client_2_IP_address port 2 1000 3 server_IP_address
+  
   dotnet fsi Client.fsx client_3_IP_address port 3 1000 3 server_IP_address
