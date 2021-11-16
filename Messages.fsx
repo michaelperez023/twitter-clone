@@ -63,3 +63,17 @@ type Ready = {
 type Offline = {
     messageName: string;
 }
+
+type Tweets = {
+    InitMentions: IActorRef;
+    MentionsRegister: string*string;
+    ParseMentions: string*string*string*DateTime;
+    UpdateMentionsClientPrinters: Map<string,ActorSelection>;
+    QueryMentions: string*string*string*DateTime;
+}
+
+type Tweet = {
+    messageName: string;
+    tweetCounter: int;
+    tweet: string;
+}

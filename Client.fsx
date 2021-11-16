@@ -67,6 +67,9 @@ let ClientActor (mailbox:Actor<_>) =
     let mutable userAddress = Map.empty
     let server = system.ActorSelection("akka.tcp://Server@" + serverip + ":8776/user/ServerActor")
 
+    // New vars, may need to send to own actor
+    let mutable tweetCounter = 0
+
     let hashtagsList = ["hashtag1"; "hashtag2"]
 
     let rec loop () = actor {
@@ -122,6 +125,24 @@ let ClientActor (mailbox:Actor<_>) =
             userAddress.[msg.userID] <! {messageName="Ready"; userID=msg.userID; clientsList=clientsList; server=server; users=users; clientID=clientID; hashtagsList=hashtagsList; time=(baseInterval*intervalMap.[msg.userID])}
         | :? Offline as msg ->
             printerRef <! "Going offline"
+        // Currently under construction
+        (*
+        | :? Tweet as msg ->
+            tweetCounter <- msg.tweetCounter + 1
+            let mutable twCount = 0
+            printerRef <! sprintf "[%s][TWEET] %s" (timestamp.ToString()) msg.tweet
+
+            if usersTweetCount.ContainsKey uid then 
+                twCount <- usersTweetCount.[uid] + 1
+                usersTweetCount <- Map.remove uid usersTweetCount
+            usersTweetCount <- Map.add uid twCount usersTweetCount
+
+            hashTagActor <! ParseHashTags(cid,uid,twt)
+            usersActor <! UpdateFeeds(cid,uid,twt, "tweeted", DateTime.Now)
+            twTotalTime <- twTotalTime + (timestamp.Subtract reqTime).TotalMilliseconds
+            let averageTime = twTotalTime / tweetCount
+            boss <! ("ServiceStats","","Tweet",(averageTime |> string),DateTime.Now) 
+        *)
         | _ ->
             ignore()
         return! loop()

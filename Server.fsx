@@ -38,7 +38,7 @@ let ServerActor (mailbox:Actor<_>) =
         let timestamp = DateTime.Now
         match message with
         | :? ServerStart as msg ->
-            printfn "Start!!"
+            printfn "Start"
         | :? ClientRegistration as msg -> 
             printfn "Client registering..."
             requests <- requests + 1UL
@@ -54,6 +54,9 @@ let ServerActor (mailbox:Actor<_>) =
             requests <- requests + 1UL
             let message = "[" + timestamp.ToString() + "][USER_REGISTER] User " + msg.userID + " registered with server"
             mailbox.Sender() <! {messageName="AckUserReg"; userID=msg.userID; message=message}
+        | :? Tweets as msg ->
+            requests <- requests + 1UL
+            mailbox.Sender() <! {messageName="Tweet"; tweetCounter=0; tweet="This is the tweet"}
         | _ ->
             ignore()
         return! loop()
