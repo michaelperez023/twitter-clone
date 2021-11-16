@@ -95,7 +95,7 @@ let ClientActor (mailbox:Actor<_>) =
                 subsrank <- Map.add (clientID + "_" + userkey) ((msg.users-1)/i) subsrank
                 intervalMap <- Map.add (clientID  + "_" + userkey) i intervalMap
             
-            server <! {messageName="ClientRegistration"; ID=clientID; IP=myIP; port=msg.port; timeStamp=DateTime.Now}
+            server <! {messageName="ClientRegistration"; clientID=clientID; clientIP=myIP; port=msg.port; timeStamp=DateTime.Now}
             for i in [1 .. msg.clients] do
                 clientsList <- (i |> string) :: clientsList
         | :? AckClientReg as msg ->

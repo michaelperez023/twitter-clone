@@ -45,7 +45,7 @@ let ServerActor (mailbox:Actor<_>) =
             //let clientPrinter = system.ActorSelection(sprintf "akka.tcp://TwitterClient@%s:%s/user/Printer" msg.IP msg.port)
             //clientPrinters <- Map.add msg.ID clientPrinter clientPrinters
             //sendToAllActors clientprinters
-            let message = "[" + timestamp.ToString() + "][CLIENT_REGISTER] Client " + msg.ID + " registered with server"
+            let message = "[" + timestamp.ToString() + "][CLIENT_REGISTER] Client " + msg.clientID + " registered with server"
             mailbox.Sender() <! {messageName="AckClientReg"; message=message}
         | :? UserRegistration as msg ->
             //let (_,cid,userid,subscount,reqTime) : Tuple<string,string,string,string,DateTime> = downcast message 

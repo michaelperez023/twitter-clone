@@ -19,8 +19,8 @@ type ClientStart  = {
 
 type ClientRegistration = {
     messageName: string;
-    ID: string;
-    IP: string;
+    clientID: string;
+    clientIP: string;
     port: string;
     timeStamp: DateTime;
 }
