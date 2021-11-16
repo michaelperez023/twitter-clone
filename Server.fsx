@@ -3,46 +3,57 @@
 #r "nuget: Akka.FSharp"
 #r "nuget: Akka.Remote"
 #r "nuget: Akka.TestKit"
+
+#load @"./Messages.fsx"
+
 open System
 open Akka.Actor
 open Akka.FSharp
 open Akka.Configuration
 
-//let serverIP = fsi.CommandLineArgs.[1] |> string
+open Messages
 
-let configuration = 
-    ConfigurationFactory.ParseString(
-        @"akka {            
-            actor {
-                provider = ""Akka.Remote.RemoteActorRefProvider, Akka.Remote""
-            }
-            remote.helios.tcp {
-                transport-protocol = tcp
-                port = 8776
-                hostname = localhost
-            }
-        }")
+let serverIP = fsi.CommandLineArgs.[1] |> string
+
+let configuration = ConfigurationFactory.ParseString(
+                        @"akka {            
+                            actor {
+                                provider = ""Akka.Remote.RemoteActorRefProvider, Akka.Remote""
+                            }
+                            remote.helios.tcp {
+                                transport-protocol = tcp
+                                port = 8776
+                                hostname = " + serverIP + "
+                            }
+                        }")
 
 let system = ActorSystem.Create("Server", configuration)
 
 let ServerActor (mailbox:Actor<_>) = 
-    let mutable clientprinters = Map.empty
+    //let mutable clientPrinters = Map.empty
     let mutable requests = 0UL
 
     let rec loop () = actor {
         let! (message:obj) = mailbox.Receive()
-        let (mtype,_,_,_,_) : Tuple<string,string,string,string,DateTime> = downcast message 
         let timestamp = DateTime.Now
-        match mtype with
-        | "Start" ->
-            printfn "Start!!"      
-        | "ClientRegister" -> 
-            let (_,cid,cliIP,port,_) : Tuple<string,string,string,string,DateTime> = downcast message 
+        match message with
+        | :? ServerStart as msg ->
+            printfn "Start!!"
+        | :? ClientRegistration as msg -> 
+            printfn "Client registering..."
             requests <- requests + 1UL
-            let clientp = system.ActorSelection(sprintf "akka.tcp://TwitterClient@%s:%s/user/Printer" cliIP port)
-            clientprinters <- Map.add cid clientp clientprinters
+            //let clientPrinter = system.ActorSelection(sprintf "akka.tcp://TwitterClient@%s:%s/user/Printer" msg.IP msg.port)
+            //clientPrinters <- Map.add msg.ID clientPrinter clientPrinters
             //sendToAllActors clientprinters
-            mailbox.Sender() <! ("AckClientReg",sprintf "[%s][CLIENT_REGISTER] Client %s registered with server" (timestamp.ToString()) cid,"","","")
+            let message = "[" + timestamp.ToString() + "][CLIENT_REGISTER] Client " + msg.ID + " registered with server"
+            mailbox.Sender() <! {messageName="AckClientReg"; message=message}
+        | :? UserRegistration as msg ->
+            //let (_,cid,userid,subscount,reqTime) : Tuple<string,string,string,string,DateTime> = downcast message 
+            //usersactor <! Register(cid, userid, subscount,reqTime)
+            //mentionsactor <! MentionsRegister(cid, userid)
+            requests <- requests + 1UL
+            let message = "[" + timestamp.ToString() + "][USER_REGISTER] User " + msg.userID + " registered with server"
+            mailbox.Sender() <! {messageName="AckUserReg"; userID=msg.userID; message=message}
         | _ ->
             ignore()
         return! loop()
@@ -52,5 +63,6 @@ let ServerActor (mailbox:Actor<_>) =
 // Start - spawn boss
 let boss = spawn system "ServerActor" ServerActor
 
-boss <! ("Start","","","",DateTime.Now)
+boss <! {messageName="ServerStart"; timeStamp=DateTime.Now}
+
 system.WhenTerminated.Wait()
