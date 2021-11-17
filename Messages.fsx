@@ -54,7 +54,7 @@ type Ready = {
     userID: string;
     clientsList: list<string>;
     server: ActorSelection;
-    users: int;
+    usersCount: int;
     clientID: string;
     hashtagsList: list<string>;
     time: int;
@@ -64,16 +64,22 @@ type Offline = {
     messageName: string;
 }
 
-type Tweets = {
+type StartTweet = {
+    messageName: string;
+}
+
+type Tweet = {
+    messageName: string;
+    clientID: string;
+    userID: string;
+    tweet: string;
+    time: DateTime;
+}
+
+(*type Tweets = {
     InitMentions: IActorRef;
     MentionsRegister: string*string;
     ParseMentions: string*string*string*DateTime;
     UpdateMentionsClientPrinters: Map<string,ActorSelection>;
     QueryMentions: string*string*string*DateTime;
-}
-
-type Tweet = {
-    messageName: string;
-    tweetCounter: int;
-    tweet: string;
-}
+}*)

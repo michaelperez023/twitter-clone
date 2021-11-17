@@ -17,8 +17,8 @@ open Messages
 let myIP = fsi.CommandLineArgs.[1] |> string
 let port = fsi.CommandLineArgs.[2] |> string
 let ID = fsi.CommandLineArgs.[3] |> string
-let users = fsi.CommandLineArgs.[4] |> string
-let noofclients = fsi.CommandLineArgs.[5] |> string
+let usersCount = fsi.CommandLineArgs.[4] |> string
+let clientsCount = fsi.CommandLineArgs.[5] |> string
 let serverip = fsi.CommandLineArgs.[6] |> string
 
 let configuration = ConfigurationFactory.ParseString(
@@ -45,11 +45,37 @@ let printerActor (mailbox:Actor<_>) =
 let printerRef = spawn system "Printer" printerActor
 
 let UserActor (mailbox:Actor<_>) = 
+    let mutable online = false
+    let mutable tweetCount = 0
+    let mutable userID = ""
+    let mutable clientsList = []
+    let mutable server = ActorSelection()
+    let mutable usersCount = 0
+    let mutable clientID = ""
+    let mutable hashtagsList = []
+    let mutable interval = 0.0
+
     let rec loop () = actor {
         let! (message:obj) = mailbox.Receive() 
         match message with
         | :? Ready as msg ->
             printerRef <! "Ready!"
+            userID <- msg.userID
+            clientsList <- msg.clientsList
+            server <- msg.server
+            usersCount <- msg.usersCount
+            clientID <- msg.clientID
+            hashtagsList <- msg.hashtagsList
+            interval <- msg.time |> double
+            online <- true
+            system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(49.0), mailbox.Self, {messageName="StartTweet";})
+        | :? StartTweet as msg ->
+            printerRef <! "Starting Tweeting!"
+            if online then
+                tweetCount <- tweetCount + 1
+                let tweet = userID + " tweeted -> tweet_" + string(tweetCount)
+                //server <! ("Tweet", clientID, userID, tweetMsg, DateTime.Now)
+                server <! {messageName="Tweet"; clientID=clientID; userID=userID; tweet=tweet; time=DateTime.Now;}
         | _ ->
             ignore()
         return! loop()
@@ -58,7 +84,7 @@ let UserActor (mailbox:Actor<_>) =
 
 let ClientActor (mailbox:Actor<_>) = 
     let mutable clientID = ""
-    let mutable users = 0
+    let mutable usersCount = 0
     let mutable clientsList = []
     let mutable usersList = []
     let mutable registeredUsersList = []
@@ -76,10 +102,10 @@ let ClientActor (mailbox:Actor<_>) =
         let! (message:obj) = mailbox.Receive() 
         match message with
         | :? ClientStart as msg ->
-            users <- msg.users
+            usersCount <- msg.users
             clientID <- msg.clientID
             printerRef <! "Client " + clientID + " Start!"
-            printerRef <! "Number of users: " + string(users)
+            printerRef <! "Number of users: " + string(usersCount)
 
             let mutable usersarr = [| 1 .. msg.users |]
             //printerRef <! "usersarr=%A" usersarr
@@ -115,34 +141,16 @@ let ClientActor (mailbox:Actor<_>) =
 
             //printerRef <! "Users registered: " + string(msg.nextID)
             
-            if msg.nextID < users then
+            if msg.nextID < usersCount then
                 system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(50.0), mailbox.Self, {messageName="RegisterUser"; nextID=msg.nextID + 1;})
         | :? AckUserReg as msg ->
             printerRef <! msg.message
-            let mutable baseInterval = users/100
+            let mutable baseInterval = usersCount/100
             if baseInterval < 5 then
                 baseInterval <- 5
-            userAddress.[msg.userID] <! {messageName="Ready"; userID=msg.userID; clientsList=clientsList; server=server; users=users; clientID=clientID; hashtagsList=hashtagsList; time=(baseInterval*intervalMap.[msg.userID])}
+            userAddress.[msg.userID] <! {messageName="Ready"; userID=msg.userID; clientsList=clientsList; server=server; usersCount=usersCount; clientID=clientID; hashtagsList=hashtagsList; time=(baseInterval*intervalMap.[msg.userID])}
         | :? Offline as msg ->
             printerRef <! "Going offline"
-        // Currently under construction
-        (*
-        | :? Tweet as msg ->
-            tweetCounter <- msg.tweetCounter + 1
-            let mutable twCount = 0
-            printerRef <! sprintf "[%s][TWEET] %s" (timestamp.ToString()) msg.tweet
-
-            if usersTweetCount.ContainsKey uid then 
-                twCount <- usersTweetCount.[uid] + 1
-                usersTweetCount <- Map.remove uid usersTweetCount
-            usersTweetCount <- Map.add uid twCount usersTweetCount
-
-            hashTagActor <! ParseHashTags(cid,uid,twt)
-            usersActor <! UpdateFeeds(cid,uid,twt, "tweeted", DateTime.Now)
-            twTotalTime <- twTotalTime + (timestamp.Subtract reqTime).TotalMilliseconds
-            let averageTime = twTotalTime / tweetCount
-            boss <! ("ServiceStats","","Tweet",(averageTime |> string),DateTime.Now) 
-        *)
         | _ ->
             ignore()
         return! loop()
@@ -152,6 +160,6 @@ let ClientActor (mailbox:Actor<_>) =
 // Start - spawn boss
 let boss = spawn system "AdminActor" ClientActor
 
-boss <! {messageName="ClientStart"; clientID=ID; users=(users |> int32); clients=(noofclients |> int32); port=port}
+boss <! {messageName="ClientStart"; clientID=ID; users=(usersCount |> int32); clients=(clientsCount |> int32); port=port}
 
 system.WhenTerminated.Wait()
