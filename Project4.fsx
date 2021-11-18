@@ -4,14 +4,78 @@
 #r "nuget: Akka.Remote"
 #r "nuget: Akka.TestKit"
 
-#load @"./Messages.fsx"
-
 open System
 open Akka.Actor
 open Akka.FSharp
 open Akka.Configuration
 
-open Messages
+type ServerStart  = {
+    messageName: string;
+    timeStamp: DateTime;
+}
+
+type ClientStart  = {
+    messageName: string;
+    clientID: string;
+    users: int;
+    clients: int;
+    port: string;
+}
+
+type ClientRegistration = {
+    messageName: string;
+    clientID: string;
+    clientIP: string;
+    port: string;
+    timeStamp: DateTime;
+}
+
+type AckClientReg = {
+    messageName: string;
+    message: string
+}
+
+type RegisterUser = {
+    messageName: string;
+    nextID: int
+}
+
+type UserRegistration = {
+    messageName: string;
+    clientID: string;
+    userID: string;
+    followers: string;
+    timeStamp: DateTime;
+}
+
+type AckUserReg = {
+    messageName: string;
+    userID: string;
+    message: string;
+}
+
+type Offline = {
+    messageName: string;
+}
+
+type UserActorMessage =
+    | StartTweet
+    | StartOtherAction
+    | Ready of string * list<string> * ActorSelection * int * string * list<string> * int
+
+type Tweet = {
+    messageName: string;
+    clientID: string;
+    userID: string;
+    tweet: string;
+    time: DateTime;
+}
+
+type RegisterUserWithMentionsActor = {
+    messageName: string;
+    clientID: string;
+    userID: string;
+}
 
 if "server" = (fsi.CommandLineArgs.[1] |> string) then
     let serverIP = fsi.CommandLineArgs.[2] |> string
