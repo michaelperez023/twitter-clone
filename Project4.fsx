@@ -138,7 +138,8 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                     let mutable userUsersFollowingSet = userUsersFollowingSetMap.[msg.userToFollowID]
                     userUsersFollowingSet <- Set.add msg.userID userUsersFollowingSet
                     userUsersFollowingSetMap <- Map.add msg.userID userUsersFollowingSet userUsersFollowingSetMap
-                    printfn "[%s][FOLLOW] User %s started following %s" (timeStamp.ToString()) msg.userID msg.userToFollowID
+                    let message = "[" + timeStamp.ToString() + "][FOLLOW] User " + msg.clientID + " started following " + msg.userToFollowID
+                    printfn $"{message}"
                     //cprinters.[cid] <! sprintf "[%s][FOLLOW] User %s started following %s" (timestamp.ToString()) uid fid
                 followTime <- followTime + (timeStamp.Subtract msg.time).TotalMilliseconds
             | _ ->
@@ -276,8 +277,6 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 let message = "[" + timestamp.ToString() + "][CLIENT_REGISTER] Client " + msg.clientID + " registered with server"
                 mailbox.Sender() <! {messageName="AckClientReg"; message=message}
             | :? UserRegistration as msg ->
-                //let (_,cid,userid,subscount,reqTime) : Tuple<string,string,string,string,DateTime> = downcast message 
-                //usersactor <! Register(cid, userid, subscount,reqTime)
                 usersActor <! {messageName="RegisterUserWithUsersActor"; clientID=msg.clientID; userID=msg.userID; followersCount=msg.followersCount; time=msg.timeStamp}
                 mentionsActor <! {messageName="RegisterUserWithMentionsActor"; clientID=msg.clientID; userID=msg.userID}
                 requestsCount <- requestsCount + 1UL
