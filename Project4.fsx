@@ -44,7 +44,7 @@ type UserRegistration = {
     messageName: string;
     clientID: string;
     userID: string;
-    followers: string;
+    followersCount: string;
     timeStamp: DateTime;
 }
 
@@ -77,6 +77,22 @@ type RegisterUserWithMentionsActor = {
     userID: string;
 }
 
+type RegisterUserWithUsersActor = {
+    messageName: string;
+    clientID: string;
+    userID: string;
+    followersCount: string;
+    time: DateTime;
+}
+
+type Follow = {
+    messageName: string;
+    clientID: string;
+    userID: string;
+    userToFollowID: string;
+    time: DateTime;
+}
+
 if "server" = (fsi.CommandLineArgs.[1] |> string) then
     let serverIP = fsi.CommandLineArgs.[2] |> string
 
@@ -93,6 +109,36 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                             }")
 
     let system = ActorSystem.Create("Server", configuration)
+
+    let UsersActor (mailbox:Actor<_>) = 
+        let mutable userFollowersCountMap = Map.empty
+        let mutable userUsersFollowingSetMap = Map.empty
+        let mutable followTime = 0.0
+        let mutable userServiceCount = 0
+
+        let rec loop () = actor {
+            let! (message:obj) = mailbox.Receive()
+            let timeStamp = DateTime.Now
+            match message with
+            | :? RegisterUserWithUsersActor as msg ->
+                userFollowersCountMap <- Map.add msg.userID (msg.followersCount |> int) userFollowersCountMap
+                userUsersFollowingSetMap <- Map.add msg.userID Set.empty userUsersFollowingSetMap
+                followTime <- followTime + (timeStamp.Subtract msg.time).TotalMilliseconds
+                userServiceCount <- userServiceCount + 1
+            | :? Follow as msg ->
+                userServiceCount <- userServiceCount + 1
+                if userUsersFollowingSetMap.ContainsKey msg.userToFollowID && not (userUsersFollowingSetMap.[msg.userToFollowID].Contains msg.userToFollowID) && userUsersFollowingSetMap.[msg.userToFollowID].Count < userFollowersCountMap.[msg.userToFollowID] then
+                    let mutable userUsersFollowingSet = userUsersFollowingSetMap.[msg.userToFollowID]
+                    userUsersFollowingSet <- Set.add msg.userID userUsersFollowingSet
+                    userUsersFollowingSetMap <- Map.add msg.userID userUsersFollowingSet userUsersFollowingSetMap
+                    printfn "[%s][FOLLOW] User %s started following %s" (timeStamp.ToString()) msg.userID msg.userToFollowID
+                    //cprinters.[cid] <! sprintf "[%s][FOLLOW] User %s started following %s" (timestamp.ToString()) uid fid
+                followTime <- followTime + (timeStamp.Subtract msg.time).TotalMilliseconds
+            | _ ->
+                ignore()
+            return! loop()
+        }
+        loop()
 
     let TweetActor (mailbox:Actor<_>) = 
         let mutable tweetCount = 0
@@ -173,6 +219,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
     let ServerActor (mailbox:Actor<_>) = 
         //let mutable clientPrinters = Map.empty
         let mutable requestsCount = 0UL
+        let mutable usersActor = null
         let mutable tweetsActor = null
         let mutable mentionsActor = null
         let mutable hashtagsActor = null
@@ -183,6 +230,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
             match message with
             | :? ServerStart as msg ->
                 printfn "Start"
+                usersActor <- spawn system ("UsersActor") UsersActor
                 tweetsActor <- spawn system ("TweetActor") TweetActor
                 mentionsActor <- spawn system ("MentionsActor") MentionsActor
                 hashtagsActor <- spawn system ("HashtagsActor") HashtagsActor
@@ -197,16 +245,19 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
             | :? UserRegistration as msg ->
                 //let (_,cid,userid,subscount,reqTime) : Tuple<string,string,string,string,DateTime> = downcast message 
                 //usersactor <! Register(cid, userid, subscount,reqTime)
+                usersActor <! {messageName="RegisterUserWithUsersActor"; clientID=msg.clientID; userID=msg.userID; followersCount=msg.followersCount; time=msg.timeStamp}
                 mentionsActor <! {messageName="RegisterUserWithMentionsActor"; clientID=msg.clientID; userID=msg.userID}
                 requestsCount <- requestsCount + 1UL
                 let message = "[" + timestamp.ToString() + "][USER_REGISTER] User " + msg.userID + " registered with server"
                 mailbox.Sender() <! {messageName="AckUserReg"; userID=msg.userID; message=message}
             | :? Tweet as msg ->
                 requestsCount <- requestsCount + 1UL
-                printfn "tweeting: %s" msg.tweet
                 mentionsActor <! msg // forward tweet to mentions Actor
                 hashtagsActor <! msg // forward tweet to hashtags Actor
                 tweetsActor <! msg // forward tweet to tweets Actor
+            | :? Follow as msg ->
+                requestsCount <- requestsCount + 1UL
+                usersActor <! msg // forward tweet to users Actor
             | _ ->
                 ignore()
             return! loop()
@@ -276,7 +327,7 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                 interval <- interval' |> double
                 online <- true
                 system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(50.0), mailbox.Self, StartTweet)
-                //system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(49.0), mailbox.Self, StartOtherAction)
+                system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(49.0), mailbox.Self, StartOtherAction)
             | StartTweet ->
                 if online then
                     let tweetTypes =  [1..4] // change to 5 after retweeting is implemented
@@ -318,12 +369,17 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                     system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(interval), mailbox.Self, {messageName="StartTweet";})  
             | StartOtherAction ->
                 if online then
-                    let actionTypes =  [1..5]
+                    let actionTypes =  [1]
                     let actionType = actionTypes.[Random().Next(actionTypes.Length)]
-                    match actionType with   
+                    match actionType with
                     | 1 ->  // follow
-                        //TODO
-                        printfn "following"
+                        let mutable userToFollow = [1 .. usersCount].[Random().Next(usersCount)] |> string
+                        let mutable randClientID = clientsList.[Random().Next(clientsList.Length)]
+                        let mutable userToFollowID = randClientID + "_" + userToFollow
+                        while userToFollowID = userID do 
+                            userToFollow <- [1 .. usersCount].[Random().Next(usersCount)] |> string
+                            userToFollowID <- randClientID + "_" + userToFollow
+                        server <! {messageName="Follow"; clientID=clientID; userID=userID; userToFollowID=userToFollowID; time=DateTime.Now;}
                     | 2 ->  // unfollow
                         //TODO
                         printfn "unfollowing"
@@ -331,10 +387,16 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                         printfn "querying tweets"
                         //TODO
                     | 4 ->  // query hashtags
+                        (*let hashTag = topHashTags.[htagRandReq.Next(topHashTags.Length)]
+                        server <! ("QueryHashtags",cliId,myId,hashTag,DateTime.Now)*)
                         printfn "querying hashtags"
                         //TODO
                     | 5 ->  // query mentions
                         printfn "querying mentions"
+                        (*let mutable mUser = [1 .. usersCount].[mentionsRandReq.Next(usersCount)] |> string
+                        let mutable randclid = clientList.[clientRand.Next(clientList.Length)]
+                        let mutable mentionsUser = sprintf "%s_%s" randclid mUser
+                        server <! ("QueryMentions",cliId,myId,mentionsUser,DateTime.Now)*)
                         //TODO
                     | _ ->
                         ()
@@ -395,7 +457,7 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                 let userRef = spawn system ("User_" + userID) UserActor
                 userAddress <- Map.add userID userRef userAddress
                 let followers = userFollowersRankMap.[userID] |> string
-                server <! {messageName="UserRegistration"; clientID=clientID; userID=userID; followers=followers; timeStamp=DateTime.Now}
+                server <! {messageName="UserRegistration"; clientID=clientID; userID=userID; followersCount=followers; timeStamp=DateTime.Now}
                 registeredUsersList <- userID :: registeredUsersList
                 //printerRef <! "Users registered: " + string(msg.nextID)
                 
