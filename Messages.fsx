@@ -39,7 +39,7 @@ type UserRegistration = {
     messageName: string;
     clientID: string;
     userID: string;
-    subsstr: string;
+    followers: string;
     timeStamp: DateTime;
 }
 
@@ -49,7 +49,11 @@ type AckUserReg = {
     message: string;
 }
 
-type Ready = {
+type Offline = {
+    messageName: string;
+}
+
+(*type Ready = {
     messageName: string;
     userID: string;
     clientsList: list<string>;
@@ -57,16 +61,21 @@ type Ready = {
     usersCount: int;
     clientID: string;
     hashtagsList: list<string>;
-    time: int;
-}
-
-type Offline = {
-    messageName: string;
+    interval: int;
 }
 
 type StartTweet = {
     messageName: string;
 }
+
+type StartOtherAction = {
+    messageName: string;
+}*)
+
+type UserActorMessage =
+    | StartTweet
+    | StartOtherAction
+    | Ready of string * list<string> * ActorSelection * int * string * list<string> * int
 
 type Tweet = {
     messageName: string;
@@ -76,10 +85,8 @@ type Tweet = {
     time: DateTime;
 }
 
-(*type Tweets = {
-    InitMentions: IActorRef;
-    MentionsRegister: string*string;
-    ParseMentions: string*string*string*DateTime;
-    UpdateMentionsClientPrinters: Map<string,ActorSelection>;
-    QueryMentions: string*string*string*DateTime;
-}*)
+type RegisterUserWithMentionsActor = {
+    messageName: string;
+    clientID: string;
+    userID: string;
+}
