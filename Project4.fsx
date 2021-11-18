@@ -71,6 +71,13 @@ type Tweet = {
     time: DateTime;
 }
 
+type Retweet = {
+    messageName: string;
+    clientID: string;
+    userID: string;
+    time: DateTime;
+}
+
 type RegisterUserWithMentionsActor = {
     messageName: string;
     clientID: string;
@@ -216,6 +223,30 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
         }
         loop()
 
+    let RetweetsActor (mailbox:Actor<_>) = 
+        let mutable userTweetsMap = Map.empty
+
+        let rec loop () = actor {
+            let! (message:obj) = mailbox.Receive() 
+            match message with
+            | :? Retweet as msg ->
+                printfn "retweeting" // TODO
+                (*if feedtable.ContainsKey uid then   
+                reTweetCount <- reTweetCount + 1.0
+                let randTweet = feedtable.[uid].[usersRand.Next(feedtable.[uid].Length)]
+                cprinters.[cid] <! sprintf "[%s][RE_TWEET] %s retweeted -> %s" (timestamp.ToString()) uid randTweet
+                reTweetTime <- reTweetTime + (timestamp.Subtract reqTime).TotalMilliseconds
+                let averageTime = reTweetTime / reTweetCount
+                mailbox.Sender() <! ("ServiceStats","","ReTweet",(averageTime |> string),DateTime.Now)
+                // printfn "cnt %f, totaltime %f, avg %f" reTweetCount reTweetTime averageTime 
+                usersactor <! UpdateFeeds(cid,uid,randTweet,"retweeted",DateTime.Now)
+                tweetactor <! IncTweet(uid)  *)
+            | _ ->
+                ignore()
+            return! loop()
+        }
+        loop()
+
     let ServerActor (mailbox:Actor<_>) = 
         //let mutable clientPrinters = Map.empty
         let mutable requestsCount = 0UL
@@ -223,6 +254,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
         let mutable tweetsActor = null
         let mutable mentionsActor = null
         let mutable hashtagsActor = null
+        let mutable retweetsActor = null
 
         let rec loop () = actor {
             let! (message:obj) = mailbox.Receive()
@@ -234,6 +266,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 tweetsActor <- spawn system ("TweetActor") TweetActor
                 mentionsActor <- spawn system ("MentionsActor") MentionsActor
                 hashtagsActor <- spawn system ("HashtagsActor") HashtagsActor
+                retweetsActor <- spawn system ("RetweetsActor") RetweetsActor
             | :? ClientRegistration as msg ->
                 printfn "Client registering..."
                 requestsCount <- requestsCount + 1UL
@@ -255,6 +288,9 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 mentionsActor <! msg // forward tweet to mentions Actor
                 hashtagsActor <! msg // forward tweet to hashtags Actor
                 tweetsActor <! msg // forward tweet to tweets Actor
+            | :? Retweet as msg ->
+                requestsCount <- requestsCount + 1UL
+                retweetsActor <! msg
             | :? Follow as msg ->
                 requestsCount <- requestsCount + 1UL
                 usersActor <! msg // forward tweet to users Actor
@@ -337,6 +373,7 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                     | 1 ->  // tweet without mention or hashtag
                         tweetCount <- tweetCount + 1
                         tweet <- userID + " tweeted -> tweet_" + string(tweetCount)
+                        server <! {messageName="Tweet"; clientID=clientID; userID=userID; tweet=tweet; time=DateTime.Now;}
                     | 2 -> // tweet with mention
                         tweetCount <- tweetCount + 1
                         let mutable mUser = [1..usersCount].[Random().Next(usersCount)] |> string
@@ -346,10 +383,12 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                             mUser <- [1..usersCount].[Random().Next(usersCount)] |> string
                             mentionsUser <- randclid +  "_" + mUser
                         tweet <- userID + " tweeted -> tweet_" + string(tweetCount) + " with mention @" + mentionsUser
+                        server <! {messageName="Tweet"; clientID=clientID; userID=userID; tweet=tweet; time=DateTime.Now;}
                     | 3 -> // tweet with hashtag
                         tweetCount <- tweetCount + 1
                         let hashtag = hashtagsList.[Random().Next(hashtagsList.Length)]
                         tweet <- userID + " tweeted -> tweet_" + string(tweetCount) + " with hashtag #" + hashtag
+                        server <! {messageName="Tweet"; clientID=clientID; userID=userID; tweet=tweet; time=DateTime.Now;}
                     | 4 -> // tweet with mention and hashtag
                         tweetCount <- tweetCount + 1
                         let mutable mUser = [1..usersCount].[Random().Next(usersCount)] |> string
@@ -360,12 +399,11 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                             mentionsUser <- randclid +  "_" + mUser
                         let hashtag = hashtagsList.[Random().Next(hashtagsList.Length)]                    
                         tweet <- userID + " tweeted -> tweet_" + string(tweetCount) + " with hashtag #" + hashtag + " and mentioned @" + mentionsUser
+                        server <! {messageName="Tweet"; clientID=clientID; userID=userID; tweet=tweet; time=DateTime.Now;}
                     | 5 -> // retweet
-                        printfn "retweeting..."
-                        //TODO
+                        server <! {messageName="Retweet"; clientID=clientID; userID=userID; time=DateTime.Now;}
                     | _ -> 
                         ()
-                    server <! {messageName="Tweet"; clientID=clientID; userID=userID; tweet=tweet; time=DateTime.Now;}
                     system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(interval), mailbox.Self, {messageName="StartTweet";})  
             | StartOtherAction ->
                 if online then
