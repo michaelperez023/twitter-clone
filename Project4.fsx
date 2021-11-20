@@ -56,12 +56,15 @@ type AckUserReg = {
 
 type Offline = {
     messageName: string;
+    //userID: string;
+    //timeStamp: DateTime;
 }
 
 type UserActorMessage =
     | StartTweet
     | StartOtherAction
     | Ready of string * list<string> * ActorSelection * int * string * list<string> * int
+    | GoOffline
 
 type Tweet = {
     messageName: string;
@@ -140,6 +143,21 @@ type InitRetweetsActor = {
     actor1: IActorRef;
 }
 
+type GoOffline = {
+    messageName: string;
+    clientID: string;
+    userID: string;
+    time: DateTime;
+}
+
+type GoOnline = {
+    messageName: string;
+    clientID: string;
+    userID: string;
+    cAdmin: IActorRef;
+    time: DateTime;
+}
+
 if "server" = (fsi.CommandLineArgs.[1] |> string) then
     let serverIP = fsi.CommandLineArgs.[2] |> string
 
@@ -164,6 +182,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
         let mutable userServiceCount = 0
         let mutable showfeedactor = mailbox.Self
         let mutable retweetactor = mailbox.Self
+        let mutable offLineUsers = Set.empty
 
         let rec loop () = actor {
             let! (message:obj) = mailbox.Receive()
@@ -189,20 +208,32 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 followTime <- followTime + (timeStamp.Subtract msg.time).TotalMilliseconds
             | :? UpdateFeeds as msg ->
                 userServiceCount <- userServiceCount + 1
-                //for id in userUsersFollowingSetMap.[msg.userID] do // This for loop does not get accesses??
-                if true then // Just temp if statement to leave indentations right
-                    showfeedactor <! {messageName="UpdateFeedTable"; followerID=msg.clientID; userID=msg.userID; tweet=msg.tweet;} // FollowerID is just id
-                    retweetactor <! {messageName="UpdateRetweetFeedTable"; id=msg.clientID; userID=msg.userID; tweet=msg.tweet} // clientID is just id
-                    (*if not (usersOffline.ContainsKey msg.clientID) then
-                        let splits = id.Split '_'
-                        let sendtoid = splits.[0]
-                        if msg.actionType = "tweeted" then
-                            //cprinters.[sendtoid] <! s
-                            printf "[%s][NEW_FEED] For User: %s -> %s" (msg.time.ToString()) id msg.tweet    
-                        else
-                            //cprinters.[sendtoid] <! s
-                            printf "[%s][NEW_FEED] For User: %s -> %s %s - %s" (msg.time.ToString()) id msg.userID msg.actionType msg.tweet
-                followTime <- followTime + (timeStamp.Subtract msg.time).TotalMilliseconds*)
+                for id in userUsersFollowingSetMap.[msg.userID] do // This for loop does not get accesses??
+                    if true then // Just temp if statement to leave indentations right
+                        showfeedactor <! {messageName="UpdateFeedTable"; followerID=msg.clientID; userID=msg.userID; tweet=msg.tweet;} // FollowerID is just id
+                        retweetactor <! {messageName="UpdateRetweetFeedTable"; id=msg.clientID; userID=msg.userID; tweet=msg.tweet} // clientID is just id
+                        if not (offLineUsers.Contains msg.clientID) then
+                            let splits = id.Split '_'
+                            let sendtoid = splits.[0]
+                            if msg.actionType = "tweeted" then
+                                //cprinters.[sendtoid] <! s
+                                printf "[%s][NEW_FEED] For User: %s -> %s" (msg.time.ToString()) id msg.tweet    
+                            else
+                                //cprinters.[sendtoid] <! s
+                                printf "[%s][NEW_FEED] For User: %s -> %s %s - %s" (msg.time.ToString()) id msg.userID msg.actionType msg.tweet
+                followTime <- followTime + (timeStamp.Subtract msg.time).TotalMilliseconds
+            | :? GoOffline as msg ->
+                userServiceCount <- userServiceCount + 1
+                printfn "We are here going offline"
+                offLineUsers <- Set.add msg.userID offLineUsers
+                followTime <- followTime + (timeStamp.Subtract msg.time).TotalMilliseconds
+                //cprinters.[cid] <! sprintf "[%s][OFFLINE] User %s is going offline" (timestamp.ToString()) uid
+            | :? GoOnline as msg  ->
+                userServiceCount <- userServiceCount + 1
+                printfn "We are now going online"
+                offLineUsers <- Set.remove msg.userID offLineUsers
+                //showfeedactor <! ShowFeeds(cid, uid, cadmin)
+                followTime <- followTime + (timeStamp.Subtract msg.time).TotalMilliseconds
             | _ ->
                 ignore()
             return! loop()
@@ -314,7 +345,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
             | :? Retweet as msg ->
                 printfn "retweeting" // TODO
                 if feedtable.ContainsKey msg.userID then
-                    printfn "WE HERE MY GUY" // Working to get this printing
+                    printfn "Finally made it inside here" // Working to get this printing
                     retweetCount <- retweetCount + 1.0
                     let randTweet = feedtable.[msg.userID].[Random().Next(feedtable.[msg.userID].Length)]
                     //cprinters.[msg.clientID] <! sprintf "[%s][RE_TWEET] %s retweeted -> %s" (timeStamp.ToString()) msg.userID randTweet
@@ -402,6 +433,12 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
             | :? Follow as msg ->
                 requestsCount <- requestsCount + 1UL
                 usersActor <! msg // forward tweet to users Actor
+            | :? GoOffline as msg ->
+                requestsCount <- requestsCount + 1UL
+                usersActor <! msg
+            | :? GoOnline as msg ->
+                requestsCount <- requestsCount + 1UL
+                usersActor <! {messageName=msg.messageName; clientID=msg.clientID; userID=msg.userID; cAdmin=mailbox.Sender(); time=msg.time}
             | _ ->
                 ignore()
             return! loop()
@@ -547,6 +584,8 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                     | _ ->
                         ()
                     system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(100.0), mailbox.Self, StartOtherAction)
+            | GoOffline ->
+                online <- false
             return! loop()
         }
         loop()
@@ -560,6 +599,7 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
         let mutable userIntervalMap = Map.empty
         let mutable userFollowersRankMap = Map.empty
         let mutable userAddress = Map.empty
+        let mutable currentlyOffline = Set.empty
         let server = system.ActorSelection("akka.tcp://Server@" + serverip + ":8776/user/ServerActor")
 
         let hashtagsList = ["VenmoItForward"; "SEIZED"; "WWE2K22"; "JusticeForJulius"; "AhmaudArbery"; 
@@ -617,8 +657,31 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                 userAddress.[msg.userID] <! Ready(msg.userID, clientsList, server, usersCount, clientID, hashtagsList, (baseInterval*userIntervalMap.[msg.userID]))
                 //{messageName="Ready"; userID=msg.userID; clientsList=clientsList; server=server; usersCount=usersCount; clientID=clientID; hashtagsList=hashtagsList; interval=(baseInterval*intervalMap.[msg.userID])}
             | :? Offline as msg ->
+                let timestamp = DateTime.Now
+                let userOffline = Random()
+                let mutable totalUsers = registeredUsersList.Length
+                totalUsers <- (30*totalUsers)/100
+                let mutable tempOfflineSet = Set.empty
+
+                for i in [1 .. totalUsers] do
+                    let mutable nextOffline = registeredUsersList.[userOffline.Next(registeredUsersList.Length)]
+                    
+                    while currentlyOffline.Contains(nextOffline) || tempOfflineSet.Contains(nextOffline) do
+                        nextOffline <- registeredUsersList.[userOffline.Next(registeredUsersList.Length)]
+                    
+                    server <! {messageName="GoOffline"; clientID=clientID; userID=nextOffline; time=timestamp}
+                    userAddress.[nextOffline] <! GoOffline
+                    tempOfflineSet <- Set.add nextOffline tempOfflineSet
+
+                // Doesn't seem to get triggered after looking at the logs
+                for goOnline in currentlyOffline do
+                    server <! {messageName="GoOnline"; clientID=clientID; userID=goOnline; time=timestamp}
+                    
+                currentlyOffline <- Set.empty
+                currentlyOffline <- tempOfflineSet
+                system.Scheduler.ScheduleTellOnce(TimeSpan.FromSeconds(5.0), mailbox.Self, {messageName="Offline";})
+
                 printerRef <! "Going offline"
-                //TODO
             | _ ->
                 ignore()
             return! loop()
