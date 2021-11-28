@@ -317,7 +317,6 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
             let (messageType, p1, p2, p3, time) : Tuple<string,string,string,string,DateTime> = downcast message
             match messageType with
             | "StartServer" ->
-                printfn "Start"
                 usersActor <- spawn system ("UsersActor") UsersActor
                 tweetsActor <- spawn system ("TweetActor") TweetActor
                 mentionsActor <- spawn system ("MentionsActor") MentionsActor
@@ -325,23 +324,24 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 retweetsActor <- spawn system ("RetweetsActor") RetweetsActor
                 showfeedActor <- spawn system ("ShowFeedActor") ShowFeedActor
 
-                // Send actors needed for references
                 tweetsActor <! InitTweetsActor(usersActor)
                 usersActor <! InitUsersActor(showfeedActor, retweetsActor)
                 retweetsActor <! InitRetweetsActor(usersActor, tweetsActor)
+
+                printfn "Server Started"
             | "ClientRegistration" ->
                 requestsCount <- requestsCount + 1UL
                 //let clientPrinter = system.ActorSelection(sprintf "akka.tcp://TwitterClient@%s:%s/user/Printer" msg.IP msg.port)
                 //clientPrinters <- Map.add msg.ID clientPrinter clientPrinters //TODO
                 //sendToAllActors clientprinters
                 let message = "[" + timestamp.ToString() + "][CLIENT_REGISTER] Client " + p1 + " registered with server"
-                mailbox.Sender() <! ("AckClientReg", message, "", "", "")
+                mailbox.Sender() <! ("ClientRegister", message, "", "", "")
             | "UserRegistration" -> // clientID, userID, followers, DateTime.Now)
                 usersActor <! RegisterUserWithUsersActor(p2, p3, time)
                 mentionsActor <! RegisterUserWithMentionsActor(p1, p2)
                 requestsCount <- requestsCount + 1UL
                 let message = "[" + timestamp.ToString() + "][USER_REGISTER] User " + p2 + " registered with server"
-                mailbox.Sender() <! ("AckUserReg", p2, message, "", "")
+                mailbox.Sender() <! ("UserRegister", p2, message, "", "")
             | "Tweet" ->
                 requestsCount <- requestsCount + 1UL
                 mentionsActor <! Tweet(p1, p2, p3, time) // forward tweet to mentions Actor
@@ -371,7 +371,6 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
         }
         loop()
 
-    // Start - spawn boss
     let boss = spawn system "ServerActor" ServerActor
 
     boss <! ("StartServer", "", "", "", DateTime.Now)
@@ -529,35 +528,33 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
         let mutable userIDUserActorRefMap = Map.empty
         let mutable currentlyOfflineUsersSet = Set.empty
         let server = system.ActorSelection("akka.tcp://Server@" + serverIP + ":8776/user/ServerActor")
-
-        let hashtagsList = ["VenmoItForward"; "SEIZED"; "WWE2K22"; "JusticeForJulius"; "AhmaudArbery"; 
-        "NASB"; "Ticketmaster"; "gowon"; "Stacy"; "Garnet"; "Gaetz"; "Accused"; "Omarova"; "Cenk"; "McMuffin";]
+        let hashtagsList = ["VenmoItForward"; "SEIZED"; "WWE2K22"; "JusticeForJulius"; "AhmaudArbery"; "NASB"; "Ticketmaster"; "gowon"; "Stacy"; "Garnet"; "Gaetz"; "Accused"; "Omarova"; "Cenk"; "McMuffin";]
 
         let rec loop () = actor {
             let! (message:obj) = mailbox.Receive()
             let (messageType, p1, p2, p3, p4) : Tuple<string,string,string,string,string> = downcast message
             match messageType with
             | "StartClient" ->
-                usersCount <- int32(p2) // usersCount
-                clientID <- p1 // clientID
+                // Get number of users, client ID, and set users array
+                usersCount <- int32(p2)
+                clientID <- p1
+                let mutable usersArray= [| 1 .. int32(p2) |]
+
+                // Print info
                 printerRef <! "Client " + clientID + " Start!"
                 printerRef <! "Number of users: " + string(usersCount)
-
-                let mutable usersArray= [| 1 .. int32(p2) |]
-                //printfn "first users array: "
                 
+                // Shuffle around users in users array
                 let swap (a: _[]) x y =
                     let tmp = a.[x]
                     a.[x] <- a.[y]
                     a.[y] <- tmp
-                let shuffle a =
-                    Array.iteri (fun i _ -> swap a i (Random().Next(i, Array.length a))) a
-
+                let rand = new System.Random()
+                let shuffle a = Array.iteri (fun i _ -> swap a i (rand.Next(i, Array.length a))) a
                 shuffle usersArray
                 usersList <- usersArray |> Array.toList
-                //printfn "second users array: "
-                //for i in 1..int32(p2)-1 do
-                //    printfn "val: %s" (string(usersArray.[i]))
+
+                // Making second user array
                 for i in [1 .. (p2 |> int32)] do
                     let userKey = usersArray.[i-1] |> string
                     userFollowersRankMap <- Map.add (clientID + "_" + userKey) ((int32(p2)-1)/i) userFollowersRankMap
@@ -565,7 +562,8 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                 server <! ("ClientRegistration", clientID, "", "", DateTime.Now)
                 for i in [1 .. int32(p3)] do
                     clientsList <- (i |> string) :: clientsList
-            | "AckClientReg" ->
+            | "ClientRegister" ->
+                // Send message to register user and time an offline simulation
                 printerRef <! p1
                 mailbox.Self <! ("RegisterUser", "1", "", "", "")
                 system.Scheduler.ScheduleTellOnce(TimeSpan.FromSeconds(5.0), mailbox.Self, ("ClientActorGoOffline", "", "", "", ""))
@@ -578,7 +576,7 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                 registeredUserIDsList <- userID :: registeredUserIDsList
                 if int32(p1) < usersCount then
                     system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(50.0), mailbox.Self, ("RegisterUser", string(int32(p1) + 1), "", "", ""))
-            | "AckUserReg" ->
+            | "UserRegister" ->
                 printerRef <! p2
                 let mutable baseInterval = usersCount/100
                 if baseInterval < 5 then
