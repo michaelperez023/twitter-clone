@@ -19,7 +19,8 @@ type UserActorMessages =
 type UsersActorMessages = 
     | InitUsersActor of IActorRef * IActorRef
     | RegisterUserWithUsersActor of string * string * DateTime
-    | ClientFollow of string * string * string * DateTime
+    | Follow of string * string * string * DateTime
+    | Unfollow of string * string
     | UsersActorGoOnline of string * string * IActorRef * DateTime
     | UsersActorGoOffline of string * string * DateTime
     | UpdateFeeds of string * string * string * string * DateTime
@@ -80,16 +81,25 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 userUsersFollowingSetMap <- Map.add userID' Set.empty userUsersFollowingSetMap
                 followTime <- followTime + (timeStamp.Subtract time').TotalMilliseconds
                 userServiceCount <- userServiceCount + 1
-            | ClientFollow (clientID', userID', userToFollowID', time') ->
+            | Follow (clientID', userID', userToFollowID', time') ->
                 userServiceCount <- userServiceCount + 1
                 if userUsersFollowingSetMap.ContainsKey userToFollowID' && not (userUsersFollowingSetMap.[userToFollowID'].Contains userToFollowID') && userUsersFollowingSetMap.[userToFollowID'].Count < userFollowersCountMap.[userToFollowID'] then
-                    let mutable userUsersFollowingSet = userUsersFollowingSetMap.[userToFollowID']
-                    userUsersFollowingSet <- Set.add userID' userUsersFollowingSet
-                    userUsersFollowingSetMap <- Map.add userID' userUsersFollowingSet userUsersFollowingSetMap
+                    let mutable tempUsersFollowingSet = userUsersFollowingSetMap.[userID']
+                    tempUsersFollowingSet <- Set.add userToFollowID' tempUsersFollowingSet
+                    userUsersFollowingSetMap <- Map.add userID' tempUsersFollowingSet userUsersFollowingSetMap
+
                     let message = "[" + timeStamp.ToString() + "][FOLLOW] User " + clientID' + " started following " + userToFollowID'
                     printfn $"{message}"
                     //cprinters.[cid] <! sprintf "[%s][FOLLOW] User %s started following %s" (timestamp.ToString()) uid fid
                 followTime <- followTime + (timeStamp.Subtract time').TotalMilliseconds
+            | Unfollow (clientID', userID') ->
+                userServiceCount <- userServiceCount + 1
+
+                let tempUsersFollowingList = Set.fold (fun l se -> se::l) [] (userUsersFollowingSetMap.Item(userID'))
+                if tempUsersFollowingList.Length > 0 then
+                    let userToUnfollowID' = tempUsersFollowingList.[Random().Next(tempUsersFollowingList.Length)]
+                    let message = "[" + DateTime.Now.ToString() + "][UNFOLLOW] User " + clientID' + " unfollowed " + userToUnfollowID'
+                    printfn $"{message}"
             | UpdateFeeds (clientID', userID', tweet', msg', time') ->
                 userServiceCount <- userServiceCount + 1
                 for id in userUsersFollowingSetMap.[userID'] do
@@ -203,9 +213,11 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                     let mutable tweetsstring = ""
                     for i in [0..(mSize-1)] do
                         tweetsstring <- "\n" + userMentionsListMap.[mentionedUserID'].[i]
-                    printf "[%s][QUERY_MENTION] by user %s: Recent 10(Max) tweets for user @%s ->%s" (time'.ToString()) userID' mentionedUserID' tweetsstring
+                    let message = "[" + time'.ToString() + "][QUERY_MENTION] by user " + userID' + ": Recent 10(Max) tweets for user @" + mentionedUserID' + " -> " + tweetsstring
+                    printfn $"{message}"
                 else
-                    printf "[%s][QUERY_MENTION] by user %s: No tweets for user @%s" (time'.ToString()) userID' mentionedUserID'
+                    let message = "[" + time'.ToString() + "][QUERY_MENTION] by user " + userID' + ": No tweets for user @" + mentionedUserID'
+                    printfn $"{message}"
                 //queryTotalTime <- queryTotalTime + (timestamp.Subtract reqTime).TotalMilliseconds // TODO
                 //let averageTime = queryTotalTime / queryCount
                 //mailbox.Sender() <! ("ServiceStats","","QueryMentions",(averageTime |> string),DateTime.Now)
@@ -373,9 +385,12 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
             | "Retweet"  ->
                 requestsCount <- requestsCount + 1UL
                 retweetsActor <! Retweet(p1, p2, time) // forward tweet to retweets Actor
-            | "ServerFollow" ->
+            | "Follow" ->
                 requestsCount <- requestsCount + 1UL
-                usersActor <! ClientFollow(p1, p2, p3, time) // forward tweet to users Actor
+                usersActor <! Follow(p1, p2, p3, time) // forward to users Actor
+            | "Unfollow" ->
+                requestsCount <- requestsCount + 1UL
+                usersActor <! Unfollow(p1, p2) // forward tweet to users Actor
             | "ServerGoOffline" ->
                 requestsCount <- requestsCount + 1UL
                 usersActor <! UsersActorGoOffline(p1, p2, time)
@@ -460,7 +475,7 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                 system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(49.0), mailbox.Self, StartOtherAction)
             | StartTweet ->
                 if online then
-                    let tweetTypes =  [1..5] // change to 5 after retweeting is implemented
+                    let tweetTypes =  [1..5]
                     let tweetType = tweetTypes.[Random().Next(tweetTypes.Length)]
                     let mutable tweet = ""
                     match tweetType with   
@@ -511,16 +526,16 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                         while userToFollowID = userID do 
                             userToFollow <- [1 .. usersCount].[Random().Next(usersCount)] |> string
                             userToFollowID <- randClientID + "_" + userToFollow
-                        server <! ("ServerFollow", clientID, userID, userToFollowID, DateTime.Now)
-                    | 2 ->  // unfollow //TODO
-                        printfn "unfollowing"
+                        server <! ("Follow", clientID, userID, userToFollowID, DateTime.Now)
+                    | 2 ->  // unfollow
+                        server <! ("Unfollow", clientID, userID, "", DateTime.Now)
                     | 3 ->  // query hashtag
                         let hashTag = hashtagsList.[Random().Next(hashtagsList.Length)]
                         server <! ("QueryHashtag", clientID, userID, hashTag, DateTime.Now)
                     | 4 ->  // query mention
                         let mutable mUser = [1 .. usersCount].[Random().Next(usersCount)] |> string
                         let mutable randclientID = clientsList.[Random().Next(clientsList.Length)]
-                        let mutable mentionedUserID = randclientID + "_%s" + mUser
+                        let mutable mentionedUserID = randclientID + "_" + mUser
                         server <! ("QueryMention", clientID, userID, mentionedUserID, DateTime.Now)
                     | _ ->
                         ()
@@ -561,7 +576,6 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                 printerRef <! "Number of users: " + string(usersCount)
 
                 let mutable usersArray= [| 1 .. int32(p2) |]
-                //printfn "first users array: "
                 
                 let swap (a: _[]) x y =
                     let tmp = a.[x]
@@ -631,8 +645,7 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
         }
         loop()
 
-    // Start - spawn boss
-    let boss = spawn system "AdminActor" ClientActor
+    let boss = spawn system "AdminActor" ClientActor // Start - spawn boss
 
     boss <! ("StartClient", ID, usersCount, clientsCount, port)
 
