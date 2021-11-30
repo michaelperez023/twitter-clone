@@ -35,10 +35,12 @@ type ShowFeedActorMessages =
     | ShowFeeds of string * IActorRef
 
 type TweetsHashtagsMentionsActorsMessages = 
-    | InitTweetsActor of IActorRef
-    | Tweet of string * string * string * DateTime
+    | IDAndTweet of string * string
+    | Tweet of string
     | RegisterUserWithMentionsActor of string * string
     | IncrementTweetCount of string
+    | QueryHashtag of string * string * string * DateTime
+    | QueryMention of string * string * string * DateTime
 
 if "server" = (fsi.CommandLineArgs.[1] |> string) then
     let serverIP = fsi.CommandLineArgs.[2] |> string
@@ -134,9 +136,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
         let rec loop () = actor {
             let! message = mailbox.Receive() 
             match message with
-            | InitTweetsActor (usersActor') ->
-                usersActor <- usersActor'
-            | Tweet (clientID', userID', tweet', time')->
+            | IDAndTweet (userID', tweet')->
                 tweetCount <- tweetCount + 1
                 printfn "Tweet: %s" tweet'
                 let mutable twCount = 0
@@ -145,9 +145,6 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 if userTweetCountMap.ContainsKey userID' then 
                     twCount <- userTweetCountMap.[userID'] + 1
                 userTweetCountMap <- Map.add userID' twCount userTweetCountMap
-
-                // Update Feeds
-                usersActor <! UpdateFeeds(clientID', userID', tweet', "tweeted", DateTime.Now)
                 
                 // These are performance metrics //TODO
                 //twTotalTime <- twTotalTime + (timestamp.Subtract reqTime).TotalMilliseconds
@@ -179,6 +176,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
     let MentionsActor (mailbox:Actor<_>) = 
         let mutable usersSet = Set.empty
         let mutable userMentionsListMap = Map.empty
+        let mutable queryCount = 0
 
         let rec loop () = actor {
             let! message = mailbox.Receive() 
@@ -186,7 +184,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
             | RegisterUserWithMentionsActor (clientID', userID') ->
                 usersSet <- Set.add userID' usersSet
                 userMentionsListMap <- Map.add userID' List.empty userMentionsListMap
-            | Tweet(clientID', userID', tweet', time') ->
+            | Tweet(tweet') ->
                 let tweetSplit = tweet'.Split ' '
                 for word in tweetSplit do
                     if word.[0] = '@' then
@@ -195,22 +193,22 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                             let mutable mentionsList = userMentionsListMap.[word.[1..(word.Length-1)]]
                             mentionsList <- tweet' :: mentionsList
                             userMentionsListMap <- Map.add mention mentionsList userMentionsListMap
-            (*| QueryMentions(cid,uid,mention,reqTime) -> // TODO
-            if cprinters.ContainsKey cid then
-                queryCount <- queryCount+1.0
-                if mentionsMap.ContainsKey mention then
+            | QueryMention(clientID', userID', mentionedUserID', time') ->
+            //if cprinters.ContainsKey cid then
+                queryCount <- queryCount + 1
+                if userMentionsListMap.ContainsKey mentionedUserID' then
                     let mutable mSize = 10
-                    if (mentionsMap.[mention].Length < 10) then
-                        mSize <- mentionsMap.[mention].Length
+                    if (userMentionsListMap.[mentionedUserID'].Length < 10) then
+                        mSize <- userMentionsListMap.[mentionedUserID'].Length
                     let mutable tweetsstring = ""
                     for i in [0..(mSize-1)] do
-                        tweetsstring <- "\n" + mentionsMap.[mention].[i]
-                    cprinters.[cid] <! sprintf "[%s][QUERY_MENTION] by user %s: Recent 10(Max) tweets for user @%s ->%s" (timestamp.ToString()) uid mention tweetsstring
+                        tweetsstring <- "\n" + userMentionsListMap.[mentionedUserID'].[i]
+                    printf "[%s][QUERY_MENTION] by user %s: Recent 10(Max) tweets for user @%s ->%s" (time'.ToString()) userID' mentionedUserID' tweetsstring
                 else
-                    cprinters.[cid] <! sprintf "[%s][QUERY_MENTION] by user %s: No tweets for user @%s" (timestamp.ToString()) uid mention
-                queryTotalTime <- queryTotalTime + (timestamp.Subtract reqTime).TotalMilliseconds
-                let averageTime = queryTotalTime / queryCount
-                mailbox.Sender() <! ("ServiceStats","","QueryMentions",(averageTime |> string),DateTime.Now)*)
+                    printf "[%s][QUERY_MENTION] by user %s: No tweets for user @%s" (time'.ToString()) userID' mentionedUserID'
+                //queryTotalTime <- queryTotalTime + (timestamp.Subtract reqTime).TotalMilliseconds // TODO
+                //let averageTime = queryTotalTime / queryCount
+                //mailbox.Sender() <! ("ServiceStats","","QueryMentions",(averageTime |> string),DateTime.Now)
             | _ ->
                 ignore()
             return! loop()
@@ -219,11 +217,12 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
 
     let HashtagsActor (mailbox:Actor<_>) = 
         let mutable hashtagTweetsListMap = Map.empty
+        let mutable queryCount = 0
 
         let rec loop () = actor {
             let! message = mailbox.Receive() 
             match message with
-            | Tweet(clientID', userID', tweet', time') ->
+            | Tweet(tweet') ->
                 let tweetSplit = tweet'.Split ' '
                 for word in tweetSplit do
                     if word.[0] = '#' then
@@ -234,24 +233,24 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                         let mutable tweetsList = hashtagTweetsListMap.[hashtag]
                         tweetsList <- tweet' :: tweetsList
                         hashtagTweetsListMap <- Map.add hashtag tweetsList hashtagTweetsListMap
-            (*| QueryHashtags(cid,uid,hashtag,reqTime) -> // TODO
-                if cprinters.ContainsKey cid then
-                    queryHTCount <- queryHTCount+1.0
-                    if hashtagsMap.ContainsKey hashtag then
-                        let mutable hSize = 10
-                        if (hashtagsMap.[hashtag].Length < 10) then
-                            hSize <- hashtagsMap.[hashtag].Length
-                        let mutable tagsstring = ""
-                        for i in [0..(hSize-1)] do
-                            tagsstring <- "\n" + hashtagsMap.[hashtag].[i]
-                        cprinters.[cid] <! sprintf "[%s][QUERY_HASHTAG] by user %s: Recent 10(Max) tweets for hashTag #%s ->%s" (timestamp.ToString()) uid hashtag tagsstring
-                    else    
-                        cprinters.[cid] <! sprintf "[%s][QUERY_HASHTAG] by user %s: No tweets for hashTag #%s" (timestamp.ToString()) uid hashtag
-                    
-                    queryHTTotalTime <- queryHTTotalTime + (timestamp.Subtract reqTime).TotalMilliseconds
-                    let averageHTTime = (queryHTTotalTime / queryHTCount)
-                    // printfn "cnt %f, totaltime %f, avg %f" queryHTCount queryHTTotalTime averageHTTime
-                    mailbox.Sender() <! ("ServiceStats","","QueryHashTag",(averageHTTime |> string),DateTime.Now)*)
+            | QueryHashtag (clientID', userID', hashtag', time') ->
+                //if cprinters.ContainsKey cid then
+                queryCount <- queryCount + 1
+                if hashtagTweetsListMap.ContainsKey hashtag' then
+                    let mutable hSize = 10
+                    if (hashtagTweetsListMap.[hashtag'].Length < 10) then
+                        hSize <- hashtagTweetsListMap.[hashtag'].Length
+                    let mutable tagsstring = ""
+                    for i in [0..(hSize-1)] do
+                        tagsstring <- "\n" + hashtagTweetsListMap.[hashtag'].[i]
+                    printf "[%s][QUERY_HASHTAG] by user %s: Recent 10(Max) tweets for hashTag #%s ->%s" (time'.ToString()) userID' hashtag' tagsstring
+                else
+                    printf "[%s][QUERY_HASHTAG] by user %s: No tweets for hashTag #%s" (time'.ToString()) userID' hashtag'
+                
+                //queryHTTotalTime <- queryHTTotalTime + (timestamp.Subtract reqTime).TotalMilliseconds // TODO
+                //let averageHTTime = (queryHTTotalTime / queryHTCount)
+                // printfn "cnt %f, totaltime %f, avg %f" queryHTCount queryHTTotalTime averageHTTime
+                //mailbox.Sender() <! ("ServiceStats","","QueryHashTag",(averageHTTime |> string),DateTime.Now)
             | _ ->
                 ignore()
             return! loop()
@@ -350,7 +349,6 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 showfeedActor <- spawn system ("ShowFeedActor") ShowFeedActor
 
                 // Send actors needed for references
-                tweetsActor <! InitTweetsActor(usersActor)
                 usersActor <! InitUsersActor(showfeedActor, retweetsActor)
                 retweetsActor <! InitRetweetsActor(usersActor, tweetsActor)
             | "ClientRegistration" ->
@@ -368,9 +366,10 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 mailbox.Sender() <! ("AckUserReg", p2, message, "", "")
             | "Tweet" ->
                 requestsCount <- requestsCount + 1UL
-                mentionsActor <! Tweet(p1, p2, p3, time) // forward tweet to mentions Actor
-                hashtagsActor <! Tweet(p1, p2, p3, time) // forward tweet to hashtags Actor
-                tweetsActor <! Tweet(p1, p2, p3, time) // forward tweet to tweets Actor
+                mentionsActor <! Tweet(p3) // forward tweet to mentions Actor
+                hashtagsActor <! Tweet(p3) // forward tweet to hashtags Actor
+                tweetsActor <! IDAndTweet(p2, p3) // forward tweet to tweets Actor
+                usersActor <! UpdateFeeds(p1, p2, p3, "tweeted", DateTime.Now)
             | "Retweet"  ->
                 requestsCount <- requestsCount + 1UL
                 retweetsActor <! Retweet(p1, p2, time) // forward tweet to retweets Actor
@@ -378,17 +377,17 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 requestsCount <- requestsCount + 1UL
                 usersActor <! ClientFollow(p1, p2, p3, time) // forward tweet to users Actor
             | "ServerGoOffline" ->
-                //printfn "server going offline"
                 requestsCount <- requestsCount + 1UL
                 usersActor <! UsersActorGoOffline(p1, p2, time)
             | "ServerGoOnline" ->
-                //printfn "server going online"
                 requestsCount <- requestsCount + 1UL
                 usersActor <! UsersActorGoOnline(p1, p2, mailbox.Sender(), time)
-            | "QueryTheMentions" ->
-                printfn "Querying mentions" // TODO
-            | "QueryTheHashtags" ->
-                printfn "Querying hashtags"
+            | "QueryHashtag" ->
+                requestsCount <- requestsCount + 1UL
+                hashtagsActor <! QueryHashtag(p1, p2, p3, time)
+            | "QueryMention" ->
+                requestsCount <- requestsCount + 1UL
+                mentionsActor <! QueryMention(p1, p2, p3, time)
             | "DisplayTotalStats" ->
                 printfn "Displaying server stats"
             | _ ->
@@ -502,7 +501,7 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                     system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(interval), mailbox.Self, StartTweet)  
             | StartOtherAction ->
                 if online then
-                    let actionTypes =  [1] // change to 1..5 when done // TODO
+                    let actionTypes =  [1..4]
                     let actionType = actionTypes.[Random().Next(actionTypes.Length)]
                     match actionType with
                     | 1 ->  // follow
@@ -515,20 +514,14 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                         server <! ("ServerFollow", clientID, userID, userToFollowID, DateTime.Now)
                     | 2 ->  // unfollow //TODO
                         printfn "unfollowing"
-                    | 3 ->  // query tweets //TODO
-                        printfn "querying tweets"
-                    | 4 ->  // query hashtags
-                        (*let hashTag = topHashTags.[htagRandReq.Next(topHashTags.Length)]
-                        server <! ("QueryHashtags",cliId,myId,hashTag,DateTime.Now)*)
-                        printfn "querying hashtags"
-                        server <! ("QueryTheHashtags", clientID, userID, "", DateTime.Now) //TODO
-                    | 5 ->  // query mentions
-                        printfn "querying mentions"
-                        server <! ("QueryTheMentions", clientID, userID, "", DateTime.Now) //TODO
-                        (*let mutable mUser = [1 .. usersCount].[mentionsRandReq.Next(usersCount)] |> string
-                        let mutable randclid = clientList.[clientRand.Next(clientList.Length)]
-                        let mutable mentionsUser = sprintf "%s_%s" randclid mUser
-                        server <! ("QueryMentions",cliId,myId,mentionsUser,DateTime.Now)*)
+                    | 3 ->  // query hashtag
+                        let hashTag = hashtagsList.[Random().Next(hashtagsList.Length)]
+                        server <! ("QueryHashtag", clientID, userID, hashTag, DateTime.Now)
+                    | 4 ->  // query mention
+                        let mutable mUser = [1 .. usersCount].[Random().Next(usersCount)] |> string
+                        let mutable randclientID = clientsList.[Random().Next(clientsList.Length)]
+                        let mutable mentionedUserID = randclientID + "_%s" + mUser
+                        server <! ("QueryMention", clientID, userID, mentionedUserID, DateTime.Now)
                     | _ ->
                         ()
                     system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(100.0), mailbox.Self, StartOtherAction)
