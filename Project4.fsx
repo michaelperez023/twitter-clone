@@ -127,7 +127,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
 
                 let message = "[" + DateTime.Now.ToString() + "] [TWEET] " + tweet'
                 mailbox.Sender() <! ("ClientPrint", clientID', userID', message)
-            | IncrementTweetCount(userID') ->
+            | IncrementTweetCount (userID') ->
                 if userTweetCountMap.ContainsKey userID' then 
                     let tweetCounter = (userTweetCountMap.[userID'] + 1)
                     userTweetCountMap <- Map.add userID' tweetCounter userTweetCountMap
@@ -147,14 +147,14 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
             | RegisterUserWithMentionsActor (clientID', userID') ->
                 usersSet <- Set.add userID' usersSet
                 userMentionsListMap <- Map.add userID' List.empty userMentionsListMap
-            | Tweet(tweet') ->
+            | Tweet (tweet') ->
                 for word in tweet'.Split ' ' do
                     if word.[0] = '@' then
                         if usersSet.Contains word.[1..(word.Length-1)] then
                             let mutable mentionsList = userMentionsListMap.[word.[1..(word.Length-1)]]
                             mentionsList <- tweet' :: mentionsList
                             userMentionsListMap <- Map.add word.[1..(word.Length-1)] mentionsList userMentionsListMap
-            | QueryMention(clientID', userID', mentionedUserID') ->
+            | QueryMention (clientID', userID', mentionedUserID') ->
                 if userMentionsListMap.ContainsKey mentionedUserID' then
                     let mutable mentionSize = userMentionsListMap.[mentionedUserID'].Length
                     if (mentionSize > 10) then
@@ -179,7 +179,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
         let rec loop () = actor {
             let! message = mailbox.Receive() 
             match message with
-            | Tweet(tweet') ->
+            | Tweet (tweet') ->
                 for word in tweet'.Split ' ' do
                     if word.[0] = '#' then
                         let hashtag = word.[1..(word.Length-1)]
@@ -198,10 +198,10 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                     for i in [0..(hashtagSize-1)] do
                         hashtags <- hashtags + "\n" + hashtagTweetsListMap.[hashtag'].[i]
 
-                    let message = "[" + DateTime.Now.ToString() + "] [QUERY_HASHTAG] by user " + userID' + " - Recent 10 (maximum) tweets that have hashtag #" + hashtag' + ": " + hashtags
+                    let message = "[" + DateTime.Now.ToString() + "] [QUERY_HASHTAG] by user " + userID' + " - recent 10 (maximum) tweets that have hashtag #" + hashtag' + ": " + hashtags
                     mailbox.Sender() <! ("ClientPrint", clientID', userID', message)
                 else
-                    let message = "[" + DateTime.Now.ToString() + "] [QUERY_HASHTAG] by user " + userID' + " - No tweets have hashtag #" + hashtag'
+                    let message = "[" + DateTime.Now.ToString() + "] [QUERY_HASHTAG] by user " + userID' + " - no tweets have hashtag #" + hashtag'
                     mailbox.Sender() <! ("ClientPrint", clientID', userID', message)
             | _ ->
                 ignore()
@@ -212,7 +212,6 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
     let RetweetsActor (mailbox:Actor<_>) = 
         let mutable userIDFeedListMap = Map.empty
         let mutable retweetCount = 0
-        let mutable retweetTime = 0.0
         let mutable usersActor = mailbox.Self
         let mutable tweetActor = mailbox.Self
 
@@ -313,7 +312,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 mentionsActor <! RegisterUserWithMentionsActor(p1, p2)
                 requestsCount <- requestsCount + 1UL
 
-                let message = "[" + DateTime.Now.ToString() + "][USER_REGISTER] User " + p2 + " registered with server"
+                let message = "[" + DateTime.Now.ToString() + "] [USER_REGISTER] User " + p2 + " registered with server"
                 mailbox.Sender() <! ("AckUserReg", p2, message, "", "")
             | "Tweet" ->
                 requestsCount <- requestsCount + 1UL
