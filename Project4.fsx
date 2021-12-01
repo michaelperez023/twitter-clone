@@ -418,13 +418,8 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 if stats.ContainsKey p2 then
                     stats <- Map.remove p2 stats
                 stats <- Map.add p2 p3 stats
-
-                //printfn "Here we have a %A that has been up for %A and has been looked at %A" p2 p3 time
-                //printfn "Displaying server stats"
             | "StatsPrinter" ->
-                let mutable temp = 0UL
-                //temp <- requestsCount / ((DateTime.Now.Subtract start).TotalSeconds |> uint64)
-                printfn "Run Time = %us, Total Requests = %u" ((DateTime.Now.Subtract start).TotalSeconds |> uint64) requestsCount //temp
+                printfn "Run Time = %us, Total Requests = %u" ((DateTime.Now.Subtract start).TotalSeconds |> uint64) requestsCount
                 system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(3000.0), mailbox.Self, ("StatsPrinter","","","",DateTime.Now))
             | _ ->
                 ignore()
