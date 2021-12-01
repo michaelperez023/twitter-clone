@@ -105,7 +105,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
             | UsersActorGoOffline (clientID', userID') ->
                     offlineUserIDsSet <- Set.add userID' offlineUserIDsSet
 
-                    let message = "[" + DateTime.Now.ToString() + "][OFFLINE] User " + userID' + " is going offline"
+                    let message = "[" + DateTime.Now.ToString() + "] [OFFLINE] User " + userID' + " is going offline"
                     mailbox.Sender() <! ("ClientPrint", clientID', userID', message)
             return! loop()
         }
@@ -216,8 +216,8 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
     let RetweetsActor (mailbox:Actor<_>) = 
         let mutable userIDFeedListMap = Map.empty
         let mutable retweetCount = 0
-        let mutable usersActor = mailbox.Self
-        let mutable tweetActor = mailbox.Self
+        let mutable usersActor = null
+        let mutable tweetActor = null
 
         let rec loop () = actor {
             let! message = mailbox.Receive() 
@@ -307,7 +307,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 let clientPrinterActorSelection = system.ActorSelection("akka.tcp://Client@" + p2 + ":" + p3 + "/user/Printer")
                 clientIDClientPrinterMap <- Map.add p1 clientPrinterActorSelection clientIDClientPrinterMap
 
-                let message = "[" + DateTime.Now.ToString() + "][CLIENT_REGISTER] Client " + p1 + " registered with server"
+                let message = "[" + DateTime.Now.ToString() + "] [CLIENT_REGISTER] Client " + p1 + " registered with server"
                 mailbox.Sender() <! ("AckClientReg", message, "", "", "")
             | "UserRegistration" -> // p1, p2, p3 = clientID, userID, followersCount
                 usersActor <! RegisterUserWithUsersActor(p2, p3)
@@ -413,9 +413,8 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
             | StartTweet ->
                 if online then
                     let tweetTypes =  [1..5]
-                    let tweetType = tweetTypes.[Random().Next(tweetTypes.Length)]
                     let mutable tweet = ""
-                    match tweetType with   
+                    match tweetTypes.[Random().Next(tweetTypes.Length)] with   
                     | 1 ->  // tweet without mention or hashtag
                         tweetCount <- tweetCount + 1
                         tweet <- "user " + userID + " tweeted tweet" + string(tweetCount)
@@ -451,8 +450,7 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
             | StartOtherAction ->
                 if online then
                     let actionTypes =  [1..4]
-                    let actionType = actionTypes.[Random().Next(actionTypes.Length)]
-                    match actionType with
+                    match actionTypes.[Random().Next(actionTypes.Length)] with
                     | 1 ->  // follow
                         let mutable userToFollow = [1 .. usersCount].[Random().Next(usersCount)] |> string
                         let mutable randClientID = clientsList.[Random().Next(clientsList.Length)]
