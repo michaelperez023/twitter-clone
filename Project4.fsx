@@ -27,13 +27,12 @@ type UsersActorMessages =
 
 type RetweetsActorMessages = 
     | InitRetweetsActor of IActorRef * IActorRef
-  //| UpdateRetweetClientPrinters of Map<string,ActorSelection>
     | UpdateRetweetFeedTable of string * string
     | Retweet of string * string * DateTime
 
 type ShowFeedActorMessages = 
     | UpdateFeedTable of string * string
-    | ShowFeeds of string * IActorRef
+    | ShowFeeds of string * string * IActorRef * IActorRef
 
 type TweetsHashtagsMentionsActorsMessages = 
     | IDAndTweet of string * string * string
@@ -59,6 +58,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
         let mutable showfeedActor = null
         let mutable retweetActor = null
         let mutable offlineUserIDsSet = Set.empty
+        let mutable server = null
 
         let rec loop () = actor {
             let! message = mailbox.Receive()
@@ -67,6 +67,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
             | InitUsersActor (actor1, actor2) ->
                 showfeedActor <- actor1
                 retweetActor <- actor2
+                server <- mailbox.Sender()
             | RegisterUserWithUsersActor (userID', followersCount', time') ->
                 // Get the amount of followers a user has and how many that user is following
                 userFollowersCountMap <- Map.add userID' (followersCount' |> int) userFollowersCountMap
@@ -93,38 +94,32 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
 
                     let message = "[" + DateTime.Now.ToString() + "][UNFOLLOW] User " + clientID' + " unfollowed " + userToUnfollowID'
                     mailbox.Sender() <! ("ClientPrint", clientID', userID', message, DateTime.Now)
-            | UpdateFeeds (clientID', userID', tweet', msg', time') ->
+            | UpdateFeeds (clientID', userID', tweet', type', time') ->
                 serviceCount <- serviceCount + 1
                 for clientID in userUsersFollowingSetMap.[userID'] do
                     showfeedActor <! UpdateFeedTable(userID', tweet')
                     retweetActor <! UpdateRetweetFeedTable(userID', tweet')
-                    (*if not (offlineUserIDsSet.Contains clientID') then
-                        let message = "[" + time'.ToString() + "][NEW_FEED_TWEET] For User: " + clientID' + " -> " + tweet'
-                        mailbox.Sender() <! ("ClientPrint", clientID', userID', message, DateTime.Now)
-                            //let splits = id.Split '_'
-                            //let sendtoid = splits.[0]
-                            let message = "[" + time'.ToString() + "][NEW_FEED_TWEET] For User: " + clientID' + " -> " + tweet'
-                            mailbox.Sender() <! ("ClientPrint", clientID', userID', message, DateTime.Now)
+                    if not (offlineUserIDsSet.Contains clientID') then
+                        let userIDSplit = clientID.Split '_'
+                        let clientIDToSendTo = userIDSplit.[0]
+                        if type' = "tweet" then
+                            let message = "[" + time'.ToString() + "][FEED_TWEET] For User: " + clientID + " -> " + tweet'
+                            server <! ("ClientPrint", clientIDToSendTo, userID', message, DateTime.Now)
                         else // retweet
-                            let message = "[" + time'.ToString() + "][NEW_FEED_RETWEET] For User: " + clientID' + " -> " + userID'
-                            mailbox.Sender() <! ("ClientPrint", clientID', userID', message, DateTime.Now)
-                            //cprinters.[sendtoid] <! s
-                            //printfn "[%s][NEW_FEED_RETWEET] For User: %s -> %s %s - %s" (time'.ToString()) clientID userID' msg' tweet'
-                followTime <- followTime + (timeStamp.Subtract time').TotalMilliseconds*)
+                            let message = "[" + time'.ToString() + "][FEED_RETWEET] For User: " + clientID + " -> " + userID' + ": " + tweet'
+                            server <! ("ClientPrint", clientIDToSendTo, userID', message, DateTime.Now)
+                followTime <- followTime + (timeStamp.Subtract time').TotalMilliseconds
             | UsersActorGoOnline (clientID', userID', cAdmin', time') ->
                     serviceCount <- serviceCount + 1
                     offlineUserIDsSet <- Set.remove userID' offlineUserIDsSet
-                    showfeedActor <! ShowFeeds(userID', cAdmin')
+                    showfeedActor <! ShowFeeds(clientID', userID', cAdmin', mailbox.Sender())
                     followTime <- followTime + (timeStamp.Subtract time').TotalMilliseconds
-
-                    let message = "[" + time'.ToString() + "][ONLINE] User " + userID' + " is going online"
-                    mailbox.Sender() <! ("ClientPrint", clientID', userID', message, DateTime.Now)
             | UsersActorGoOffline (clientID', userID', time') ->
                     serviceCount <- serviceCount + 1
                     offlineUserIDsSet <- Set.add userID' offlineUserIDsSet
                     followTime <- followTime + (timeStamp.Subtract time').TotalMilliseconds
 
-                    let message = "[" + time'.ToString() + "][OFFLINE] User " + userID' + " is going offline"
+                    let message = "\n\n\n\n[" + time'.ToString() + "][OFFLINE] User " + userID' + " is going offline\n\n\n\n"
                     mailbox.Sender() <! ("ClientPrint", clientID', userID', message, DateTime.Now)
             (*| UsersPrint(stats, perf, reqTime) ->  // TODO
             serviceCount <- serviceCount + 1.0
@@ -295,22 +290,20 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                     //reTweetTime <- reTweetTime + (timeStamp.Subtract time').TotalMilliseconds // TODO
                     //let averageTime = reTweetTime / reTweetCount
                     //mailbox.Sender() <! ("ServiceStats","","ReTweet",(averageTime |> string),DateTime.Now)
-                    usersActor <! UpdateFeeds(clientID', userID', randTweet, "retweeted", DateTime.Now)
+                    usersActor <! UpdateFeeds(clientID', userID', randTweet, "retweet", DateTime.Now)
                     tweetActor <! IncrementTweetCount(userID') // Increment user's tweet count
             return! loop()
         }
         loop()
 
     let ShowFeedActor (mailbox:Actor<_>) = 
-        //let mutable clientPrinter = Map.empty
         let mutable userIDFeedListMap = Map.empty
 
         let rec loop () = actor {
             let! message = mailbox.Receive()
+            let timeStamp = DateTime.Now
             match message with
-            //| UpdateShowFeedClientPrinters(ob) ->
-            //    cprinters <- ob
-            | ShowFeeds(userID', cAdmin') ->
+            | ShowFeeds(clientID', userID', cAdmin', server') ->
                 if userIDFeedListMap.ContainsKey userID' then
                     let mutable feedsTop = ""
                     let mutable feedSize = 10
@@ -319,16 +312,14 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                         feedSize <- feedList.Length
                     for i in [0..(feedSize-1)] do
                         feedsTop <- "\n" + userIDFeedListMap.[userID'].[i]
-                    //let message = "[" + time'.ToString() + "][RETWEET] by user " + userID' + ": " + randTweet
-                    //mailbox.Sender() <! ("ClientPrint", clientID', userID', message, DateTime.Now)
 
-                    //printf "[%s][ONLINE] User %s is online..Feeds -> %s" (DateTime.Now.ToString()) userID' feedsTop
-                    //cprinters.[cid] <! sprintf "[%s][ONLINE] User %s is online..Feeds -> %s" (timestamp.ToString()) uid feedsTop
-                //else
-                    //printf "[%s][ONLINE] User %s is online..No feeds yet!!!" (DateTime.Now.ToString()) userID'
-                    //cprinters.[cid] <! sprintf "[%s][ONLINE] User %s is online..No feeds yet!!!" (timestamp.ToString()) uid
+                    let message = "[" + timeStamp.ToString() + "][ONLINE] User " + userID' + " is online..Feeds -> " + feedsTop
+                    server' <! ("ClientPrint", clientID', userID', message, DateTime.Now)
+                else
+                    let message = "[" + timeStamp.ToString() + "][ONLINE] User " + userID' + " is online..No feeds yet!!!"
+                    server' <! ("ClientPrint", clientID', userID', message, DateTime.Now)
                 cAdmin' <! ("AckOnline", userID', "", "", "")
-            | UpdateFeedTable (userID', tweet')->
+            | UpdateFeedTable (userID', tweet') ->
                 let mutable tempList = []
                 if userIDFeedListMap.ContainsKey userID' then
                     tempList <- userIDFeedListMap.[userID']
@@ -339,7 +330,6 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
         loop()
 
     let ServerActor (mailbox:Actor<_>) = 
-        //let mutable clientPrinters = Map.empty
         let mutable requestsCount = 0UL
         let mutable usersActor = null
         let mutable tweetsActor = null
@@ -347,7 +337,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
         let mutable hashtagsActor = null
         let mutable retweetsActor = null
         let mutable showfeedActor = null
-        let mutable clientIDclientPrinterMap = Map.empty
+        let mutable clientIDClientPrinterMap = Map.empty
 
         let rec loop () = actor {
             let! (message:obj) = mailbox.Receive()
@@ -369,7 +359,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
             | "ClientRegistration" ->
                 requestsCount <- requestsCount + 1UL
                 let clientPrinterActorSelection = system.ActorSelection(sprintf "akka.tcp://Client@%s:%s/user/Printer" p2 p3)
-                clientIDclientPrinterMap <- Map.add p1 clientPrinterActorSelection clientIDclientPrinterMap
+                clientIDClientPrinterMap <- Map.add p1 clientPrinterActorSelection clientIDClientPrinterMap
                 let message = "[" + timestamp.ToString() + "][CLIENT_REGISTER] Client " + p1 + " registered with server"
                 mailbox.Sender() <! ("AckClientReg", message, "", "", "")
             | "UserRegistration" -> // clientID, userID, followers, DateTime.Now)
@@ -383,7 +373,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 mentionsActor <! Tweet(p3) // forward tweet to mentions Actor
                 hashtagsActor <! Tweet(p3) // forward tweet to hashtags Actor
                 tweetsActor <! IDAndTweet(p1, p2, p3) // forward tweet to tweets Actor
-                usersActor <! UpdateFeeds(p1, p2, p3, "tweeted", DateTime.Now)
+                usersActor <! UpdateFeeds(p1, p2, p3, "tweet", DateTime.Now)
             | "Retweet"  ->
                 requestsCount <- requestsCount + 1UL
                 retweetsActor <! Retweet(p1, p2, time) // forward tweet to retweets Actor
@@ -407,7 +397,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 mentionsActor <! QueryMention(p1, p2, p3, time)
             | "ClientPrint" ->
                 requestsCount <- requestsCount + 1UL
-                clientIDclientPrinterMap.[p1] <! p3
+                clientIDClientPrinterMap.[p1] <! p3
             | "DisplayTotalStats" ->
                 printfn "Displaying server stats"
             | _ ->
@@ -481,9 +471,6 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                         tweetCount <- tweetCount + 1
                         tweet <- userID + " tweeted -> tweet_" + string(tweetCount)
                         server <! ("Tweet", clientID, userID, tweet, DateTime.Now)
-
-                        //let message = "[" + DateTime.Now.ToString() + "][TWEET] " + tweet
-                        //printfn $"{message}"
                     | 2 -> // tweet with mention
                         tweetCount <- tweetCount + 1
                         let mutable mUser = [1..usersCount].[Random().Next(usersCount)] |> string
@@ -511,7 +498,7 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                         tweet <- userID + " tweeted -> tweet_" + string(tweetCount) + " with hashtag #" + hashtag + " and mentioned @" + mentionsUser
                         server <! ("Tweet", clientID, userID, tweet, DateTime.Now)
                     | 5 -> // retweet
-                        server <! ("Retweet", clientID, userID, tweet, DateTime.Now) // TODO, print
+                        server <! ("Retweet", clientID, userID, tweet, DateTime.Now)
                     | _ ->
                         ()
                     system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(interval), mailbox.Self, StartTweet)  
