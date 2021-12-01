@@ -10,7 +10,7 @@ open Akka.FSharp
 open Akka.Configuration
 
 type UserActorMessages = 
-    | Ready of (string*list<string>*ActorSelection*int*string*List<string>*int)
+    | StartUserActor of (string*list<string>*ActorSelection*int*string*List<string>*int)
     | StartTweet
     | StartOtherAction
     | UserActorGoOffline
@@ -70,7 +70,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 userFollowersCountMap <- Map.add userID' (followersCount' |> int) userFollowersCountMap
                 userUsersFollowingSetMap <- Map.add userID' Set.empty userUsersFollowingSetMap
             | Follow (clientID', userID', userToFollowID') ->
-                // Follow another account as long as it is not the user themselves
+                // Follow another account as long as it is not the user themselves, that the user's followers is less than their followers count
                 if userUsersFollowingSetMap.ContainsKey userToFollowID' && not (userUsersFollowingSetMap.[userToFollowID'].Contains userToFollowID') && userUsersFollowingSetMap.[userToFollowID'].Count < userFollowersCountMap.[userToFollowID'] then
                     let mutable tempUsersFollowingSet = userUsersFollowingSetMap.[userID']
                     tempUsersFollowingSet <- Set.add userToFollowID' tempUsersFollowingSet
@@ -95,7 +95,8 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                         if type' = "tweet" then
                             let message = "[" + DateTime.Now.ToString() + "] [FEED_TWEET] for user " + clientID + ": '" + tweet' + "'"
                             server <! ("ClientPrint", clientIDToSendTo, userID', message)
-                        else // retweet
+
+                        if type' = "retweet" then
                             let message = "[" + DateTime.Now.ToString() + "] [FEED_RETWEET] for user " + clientID + ": '" + tweet' + "'"
                             server <! ("ClientPrint", clientIDToSendTo, userID', message)
             | UsersActorGoOnline (clientID', userID', cAdmin') ->
@@ -159,9 +160,11 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                     let mutable mentionSize = userMentionsListMap.[mentionedUserID'].Length
                     if (mentionSize > 10) then
                         mentionSize <- 10
+
                     let mutable tweets = ""
                     for i in [0..(mentionSize-1)] do
                         tweets <- "\n" + userMentionsListMap.[mentionedUserID'].[i]
+
                     let message = "[" + DateTime.Now.ToString() + "] [QUERY_MENTION] by user " + userID' + " - recent tweets for user @" + mentionedUserID' + ": " + tweets
                     mailbox.Sender() <! ("ClientPrint", clientID', userID', message)
                 else
@@ -194,6 +197,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                     let mutable hashtagSize = hashtagTweetsListMap.[hashtag'].Length
                     if (hashtagSize > 10) then
                         hashtagSize <- 10
+
                     let mutable hashtags = ""
                     for i in [0..(hashtagSize-1)] do
                         hashtags <- hashtags + "\n" + hashtagTweetsListMap.[hashtag'].[i]
@@ -296,8 +300,6 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 hashtagsActor <- spawn system ("HashtagsActor") HashtagsActor
                 mentionsActor <- spawn system ("MentionsActor") MentionsActor
                 showfeedActor <- spawn system ("ShowFeedActor") ShowFeedActor
-
-                // Send actors the references
                 usersActor <! InitUsersActor(showfeedActor, retweetsActor)
                 retweetsActor <! InitRetweetsActor(usersActor, tweetsActor)
             | "ClientRegistration" ->
@@ -307,7 +309,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
 
                 let message = "[" + DateTime.Now.ToString() + "][CLIENT_REGISTER] Client " + p1 + " registered with server"
                 mailbox.Sender() <! ("AckClientReg", message, "", "", "")
-            | "UserRegistration" -> // clientID, userID, followers, DateTime.Now
+            | "UserRegistration" -> // p1, p2, p3 = clientID, userID, followersCount
                 usersActor <! RegisterUserWithUsersActor(p2, p3)
                 mentionsActor <! RegisterUserWithMentionsActor(p1, p2)
                 requestsCount <- requestsCount + 1UL
@@ -390,24 +392,24 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
         let mutable server = ActorSelection()
         let mutable usersCount = 0
         let mutable tweetCount = 0
-        let mutable interval = 0.0
+        let mutable tweetInterval = 0.0
         let mutable clientsList = []
         let mutable hashtagsList = []
 
         let rec loop () = actor {
             let! message = mailbox.Receive()
             match message with
-            | Ready(userID', clientsList', server', usersCount', clientID', hashtagsList', interval') ->
+            | StartUserActor(userID', clientsList', server', usersCount', clientID', hashtagsList', tweetInterval') ->
+                system.Scheduler.ScheduleTellOnce(TimeSpan.FromSeconds(tweetInterval), mailbox.Self, StartTweet)
+                system.Scheduler.ScheduleTellOnce(TimeSpan.FromSeconds(0.02), mailbox.Self, StartOtherAction)
                 userID <- userID'
                 clientsList <- clientsList'
                 server <- server'
                 usersCount <- usersCount'
                 clientID <- clientID'
                 hashtagsList <- hashtagsList'
-                interval <- interval' |> double
+                tweetInterval <- tweetInterval' |> double
                 online <- true
-                system.Scheduler.ScheduleTellOnce(TimeSpan.FromSeconds(0.01), mailbox.Self, StartTweet)
-                system.Scheduler.ScheduleTellOnce(TimeSpan.FromSeconds(0.02), mailbox.Self, StartOtherAction)
             | StartTweet ->
                 if online then
                     let tweetTypes =  [1..5]
@@ -420,35 +422,32 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                         server <! ("Tweet", clientID, userID, tweet)
                     | 2 -> // tweet with mention
                         tweetCount <- tweetCount + 1
-                        let mutable mUser = [1..usersCount].[Random().Next(usersCount)] |> string
-                        let mutable randclid = clientsList.[Random().Next(clientsList.Length)]
-                        let mutable mentionsUser = randclid +  "_" + mUser
+                        let mutable randomClientID = clientsList.[Random().Next(clientsList.Length)]
+                        let mutable mentionsUser = randomClientID +  "_" + ([1..usersCount].[Random().Next(usersCount)] |> string)
                         while mentionsUser = userID do 
-                            mUser <- [1..usersCount].[Random().Next(usersCount)] |> string
-                            mentionsUser <- randclid +  "_" + mUser
+                            mentionsUser <- randomClientID +  "_" + ([1..usersCount].[Random().Next(usersCount)] |> string)
+
                         tweet <- "user " + userID + " tweeted tweet" + string(tweetCount) + " with mention @" + mentionsUser
                         server <! ("Tweet", clientID, userID, tweet)
                     | 3 -> // tweet with hashtag
                         tweetCount <- tweetCount + 1
-                        let hashtag = hashtagsList.[Random().Next(hashtagsList.Length)]
-                        tweet <- userID + " tweeted tweet" + string(tweetCount) + " with hashtag #" + hashtag
+
+                        tweet <- userID + " tweeted tweet" + string(tweetCount) + " with hashtag #" + hashtagsList.[Random().Next(hashtagsList.Length)]
                         server <! ("Tweet", clientID, userID, tweet)
                     | 4 -> // tweet with mention and hashtag
                         tweetCount <- tweetCount + 1
-                        let mutable mUser = [1..usersCount].[Random().Next(usersCount)] |> string
-                        let mutable randclid = clientsList.[Random().Next(clientsList.Length)]
-                        let mutable mentionsUser = randclid +  "_" + mUser
+                        let mutable randomClientID = clientsList.[Random().Next(clientsList.Length)]
+                        let mutable mentionsUser = randomClientID +  "_" + ([1..usersCount].[Random().Next(usersCount)] |> string)
                         while mentionsUser = userID do 
-                            mUser <- [1..usersCount].[Random().Next(usersCount)] |> string
-                            mentionsUser <- randclid +  "_" + mUser
-                        let hashtag = hashtagsList.[Random().Next(hashtagsList.Length)]                    
-                        tweet <- userID + " tweeted tweet" + string(tweetCount) + " with hashtag #" + hashtag + " and mentioned @" + mentionsUser
+                            mentionsUser <- randomClientID +  "_" + ([1..usersCount].[Random().Next(usersCount)] |> string)
+
+                        tweet <- userID + " tweeted tweet" + string(tweetCount) + " with hashtag #" + hashtagsList.[Random().Next(hashtagsList.Length)] + " and mentioned @" + mentionsUser
                         server <! ("Tweet", clientID, userID, tweet)
                     | 5 -> // retweet
                         server <! ("Retweet", clientID, userID, tweet)
                     | _ ->
                         ()
-                    system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(interval), mailbox.Self, StartTweet)  
+                    system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(tweetInterval), mailbox.Self, StartTweet)  
             | StartOtherAction ->
                 if online then
                     let actionTypes =  [1..4]
@@ -491,8 +490,8 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
         let mutable clientsList = []
         let mutable usersList = []
         let mutable registeredUserIDsList = []
-        let mutable userIntervalMap = Map.empty
-        let mutable userFollowersRankMap = Map.empty
+        let mutable userTweetFrequencyMap = Map.empty
+        let mutable userFollowersCountMap = Map.empty
         let mutable userIDUserActorRefMap = Map.empty
         let mutable currentlyOfflineUsersSet = Set.empty
         let server = system.ActorSelection("akka.tcp://Server@" + serverIP + ":8776/user/ServerActor")
@@ -507,7 +506,7 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
             let! (message:obj) = mailbox.Receive()
             let (messageType, p1, p2, p3, p4) : Tuple<string,string,string,string,string> = downcast message
             match messageType with
-            | "StartClient" ->
+            | "StartClient" -> // p1, p2, p3, p4 = ID, usersCount, clientsCount, clientPort // TODO change
                 usersCount <- int32(p2) // usersCount
                 clientID <- p1 // clientID
                 printerRef <! "Client " + clientID + " Start!"
@@ -524,8 +523,8 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                 usersList <- usersArray |> Array.toList
                 for i in [1 .. (p2 |> int32)] do
                     let userKey = usersArray.[i-1] |> string
-                    userFollowersRankMap <- Map.add (clientID + "_" + userKey) ((int32(p2)-1)/i) userFollowersRankMap
-                    userIntervalMap <- Map.add (clientID  + "_" + userKey) i userIntervalMap
+                    userFollowersCountMap <- Map.add (clientID + "_" + userKey) ((int32(p2)-1)/i) userFollowersCountMap // create zipf distribution
+                    userTweetFrequencyMap <- Map.add (clientID  + "_" + userKey) i userTweetFrequencyMap
                 server <! ("ClientRegistration", clientID, clientIP, p4)
                 for i in [1 .. int32(p3)] do
                     clientsList <- (i |> string) :: clientsList
@@ -537,20 +536,20 @@ if "client" = (fsi.CommandLineArgs.[1] |> string) then
                 let mutable userID = clientID  + "_" + (usersList.[int32(p1)-1] |> string)
                 let userRef = spawn system ("User_" + userID) UserActor
                 userIDUserActorRefMap <- Map.add userID userRef userIDUserActorRefMap
-                let followers = userFollowersRankMap.[userID] |> string
-                server <! ("UserRegistration", clientID, userID, followers)
+                let followersCount = userFollowersCountMap.[userID] |> string
+                server <! ("UserRegistration", clientID, userID, followersCount)
                 registeredUserIDsList <- userID :: registeredUserIDsList
                 if int32(p1) < usersCount then
                     system.Scheduler.ScheduleTellOnce(TimeSpan.FromSeconds(0.05), mailbox.Self, ("RegisterUser", string(int32(p1) + 1), "", "", ""))
-            | "AckUserReg" ->
+            | "AckUserReg" -> // p1, p2, p3, p4 = userID, message, "", ""
                 printerRef <! p2
-                let mutable baseInterval = usersCount/100
-                if baseInterval < 5 then
-                    baseInterval <- 5
-                userIDUserActorRefMap.[p1] <! Ready(p1, clientsList, server, usersCount, clientID, hashtagsList, (baseInterval*userIntervalMap.[p1]))
+                let mutable baseTweetInterval = usersCount/100
+                if baseTweetInterval < 5 then
+                    baseTweetInterval <- 5
+                userIDUserActorRefMap.[p1] <! StartUserActor(p1, clientsList, server, usersCount, clientID, hashtagsList, (baseTweetInterval*userTweetFrequencyMap.[p1]))
             | "ClientActorGoOffline" ->
                 let mutable totalUsers = registeredUserIDsList.Length
-                totalUsers <- (30*totalUsers)/100
+                totalUsers <- (10*totalUsers)/100
                 let mutable tempOfflineUserIDsSet = Set.empty
 
                 for i in [1 .. totalUsers] do
