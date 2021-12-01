@@ -203,13 +203,10 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                     let mutable mentionSize = 10
                     if (userMentionsListMap.[mentionedUserID'].Length < 10) then
                         mentionSize <- userMentionsListMap.[mentionedUserID'].Length
-                    let mutable tweetsstring = ""
-                    printfn "userMentionsListMap: "
+                    let mutable tweetsString = ""
                     for i in [0..(mentionSize-1)] do
-                        printfn "val: %s" userMentionsListMap.[mentionedUserID'].[i]
-                        tweetsstring <- tweetsstring + "\n" + userMentionsListMap.[mentionedUserID'].[i]
-                    printfn "tweetsstring: %s" tweetsstring
-                    let message = "[" + time'.ToString() + "][QUERY_MENTION] by user " + userID' + ": Recent 10(Max) tweets for user @" + mentionedUserID' + " -> " + tweetsstring // TODO fix
+                        tweetsString <- tweetsString + "\n" + userMentionsListMap.[mentionedUserID'].[i]
+                    let message = "[" + time'.ToString() + "][QUERY_MENTION] by user " + userID' + ": Recent 10(Max) tweets for user @" + mentionedUserID' + " -> " + tweetsString // TODO fix
                     mailbox.Sender() <! ("ClientPrint", clientID', userID', message, DateTime.Now)
                 else
                     let message = "[" + time'.ToString() + "][QUERY_MENTION] by user " + userID' + ": No tweets for user @" + mentionedUserID'
@@ -341,13 +338,9 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
         let mutable hashtagsActor = null
         let mutable retweetsActor = null
         let mutable showfeedActor = null
-<<<<<<< HEAD
-        let mutable clientIDclientPrinterMap = Map.empty
+        let mutable clientIDClientPrinterMap = Map.empty
         let mutable stats = Map.empty
         let mutable start = DateTime.Now
-=======
-        let mutable clientIDClientPrinterMap = Map.empty
->>>>>>> 57c195a1d8c7bc1480b612d1b536ca09d0bc3ea6
 
         let rec loop () = actor {
             let! (message:obj) = mailbox.Receive()
@@ -410,22 +403,18 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 requestsCount <- requestsCount + 1UL
                 clientIDClientPrinterMap.[p1] <! p3
             | "DisplayTotalStats" ->
-<<<<<<< HEAD
                 // Update stats for specific parameter
                 if stats.ContainsKey p2 then
-                    stats <- Map.remove p2 stats
+                     stats <- Map.remove p2 stats
                 stats <- Map.add p2 p3 stats
 
-                //printfn "Here we have a %A that has been up for %A and has been looked at %A" p2 p3 time
-                //printfn "Displaying server stats"
+                 //printfn "Here we have a %A that has been up for %A and has been looked at %A" p2 p3 time
+                 //printfn "Displaying server stats"
             | "StatsPrinter" ->
-                let mutable temp = 0UL
-                temp <- requestsCount / ((DateTime.Now.Subtract start).TotalSeconds |> uint64)
-                printfn "Server uptime = %u seconds, requests served = %u, Avg requests served = %u per second" ((DateTime.Now.Subtract start).TotalSeconds |> uint64) requestsCount temp
-                system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(3000.0), mailbox.Self, ("StatsPrinter","","","",DateTime.Now))
-=======
-                printfn "Displaying server stats"
->>>>>>> 57c195a1d8c7bc1480b612d1b536ca09d0bc3ea6
+                 let mutable temp = 0UL
+                 temp <- requestsCount / ((DateTime.Now.Subtract start).TotalSeconds |> uint64)
+                 printfn "Server uptime = %u seconds, requests served = %u, Avg requests served = %u per second" ((DateTime.Now.Subtract start).TotalSeconds |> uint64) requestsCount temp
+                 system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(3000.0), mailbox.Self, ("StatsPrinter","","","",DateTime.Now))
             | _ ->
                 ignore()
             return! loop()
