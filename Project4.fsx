@@ -357,6 +357,8 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
         let mutable retweetsActor = null
         let mutable showfeedActor = null
         let mutable clientIDclientPrinterMap = Map.empty
+        let mutable stats = Map.empty
+        let mutable start = DateTime.Now
 
         let rec loop () = actor {
             let! (message:obj) = mailbox.Receive()
@@ -365,6 +367,7 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
             match messageType with
             | "StartServer" ->
                 printfn "Server Started"
+                system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(3000.0), mailbox.Self, ("StatsPrinter","","","",DateTime.Now))
                 usersActor <- spawn system ("UsersActor") UsersActor
                 tweetsActor <- spawn system ("TweetActor") TweetActor
                 retweetsActor <- spawn system ("RetweetsActor") RetweetsActor
@@ -418,9 +421,18 @@ if "server" = (fsi.CommandLineArgs.[1] |> string) then
                 requestsCount <- requestsCount + 1UL
                 clientIDclientPrinterMap.[p1] <! p3
             | "DisplayTotalStats" ->
-                // TODO
-                printfn "Here we have a %A that has been up for %A and has been looked at %A" p2 p3 time
-                printfn "Displaying server stats"
+                // Update stats for specific parameter
+                if stats.ContainsKey p2 then
+                    stats <- Map.remove p2 stats
+                stats <- Map.add p2 p3 stats
+
+                //printfn "Here we have a %A that has been up for %A and has been looked at %A" p2 p3 time
+                //printfn "Displaying server stats"
+            | "StatsPrinter" ->
+                let mutable temp = 0UL
+                temp <- requestsCount / ((DateTime.Now.Subtract start).TotalSeconds |> uint64)
+                printfn "Server uptime = %u seconds, requests served = %u, Avg requests served = %u per second" ((DateTime.Now.Subtract start).TotalSeconds |> uint64) requestsCount temp
+                system.Scheduler.ScheduleTellOnce(TimeSpan.FromMilliseconds(3000.0), mailbox.Self, ("StatsPrinter","","","",DateTime.Now))
             | _ ->
                 ignore()
             return! loop()
