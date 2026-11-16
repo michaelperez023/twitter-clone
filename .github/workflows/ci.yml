@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    name: Smoke run (server and one client on loopback)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore packages and compile the script
+        run: dotnet fsi TwitterClone.fsx help
+
+      - name: Run a server and a client with 20 users for 30 seconds
+        run: |
+          setsid dotnet fsi TwitterClone.fsx server 127.0.0.1 > server.log 2>&1 < /dev/null &
+          server_pid=$!
+          for _ in $(seq 1 120); do
+            grep -q "Server started" server.log 2> /dev/null && break
+            sleep 1
+          done
+          if ! grep -q "Server started" server.log; then
+            echo "The server did not start"
+            exit 1
+          fi
+
+          setsid dotnet fsi TwitterClone.fsx client 127.0.0.1 4801 1 20 1 127.0.0.1 > client.log 2>&1 < /dev/null &
+          client_pid=$!
+          # Start the 30 seconds once the client has compiled and registered with the server
+          for _ in $(seq 1 120); do
+            grep -qF "[CLIENT_REGISTER]" client.log 2> /dev/null && break
+            sleep 1
+          done
+          if grep -qF "[CLIENT_REGISTER]" client.log 2> /dev/null; then
+            sleep 30
+          fi
+
+          # Check only what was logged while both processes were running:
+          # stopping them makes Akka.Remote log disassociation errors.
+          cp server.log server-run.log
+          cp client.log client-run.log
+          kill -TERM -- "-$client_pid" "-$server_pid" || true
+          sleep 3
+          kill -KILL -- "-$client_pid" "-$server_pid" 2> /dev/null || true
+
+          if ! grep -qF "[CLIENT_REGISTER]" client-run.log; then
+            echo "The client did not register with the server"
+            exit 1
+          fi
+
+          grep -F "[STATS]" server-run.log | tail -n 2 || true
+          tweet_lines=$(grep -cF "] [TWEET] " client-run.log || true)
+          feed_lines=$(grep -cF "] [FEED_TWEET] " client-run.log || true)
+          server_tweets=$(grep -F "[STATS] by type" server-run.log | tail -n 1 | grep -oE "\bTweet=[0-9]+" | cut -d= -f2 || true)
+          echo "Tweets counted by the server: ${server_tweets:-0}; [TWEET] lines on the client: $tweet_lines; [FEED_TWEET] lines: $feed_lines"
+
+          if grep -qE "Exception|\[ERROR]" server-run.log client-run.log; then
+            echo "Errors were logged during the run:"
+            grep -nE "Exception|\[ERROR]" server-run.log client-run.log | head -n 20 || true
+            exit 1
+          fi
+          if [ "${server_tweets:-0}" -eq 0 ] || [ "$tweet_lines" -eq 0 ]; then
+            echo "No tweets were processed"
+            exit 1
+          fi
+          if [ "$feed_lines" -eq 0 ]; then
+            echo "No tweets were delivered to followers"
+            exit 1
+          fi
+
+      - name: Show the end of the logs
+        if: failure()
+        run: tail -n 60 server.log client.log || true
