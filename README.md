@@ -4,7 +4,7 @@ A Twitter-like engine and a load simulator written in F# with [Akka.NET](https:/
 
 Everything is in one script, [`TwitterClone.fsx`](TwitterClone.fsx), run with `dotnet fsi`.
 
-This is Part I of Project 4 for COP 5615 Distributed Operating System Principles at the University of Florida (Fall 2021, Dr. Alin Dobra). Part II adds a web interface built with Suave: [twitter-clone-part2](https://github.com/michaelperez023/twitter-clone-part2).
+This is Part I of Project 4 for COP 5615 Distributed Operating System Principles at the University of Florida (Fall 2021, Dr. Alin Dobra). It was updated in 2026. Part II adds a web interface built with Suave: [twitter-clone-part2](https://github.com/michaelperez023/twitter-clone-part2).
 
 Written by [Michael Perez](https://github.com/michaelperez023) and [Blas Kojusner](https://github.com/bkojusner).
 
@@ -180,25 +180,6 @@ These rates are the load that the simulated users generate, not the server's lim
 With 4 × 1,000 users the server did not keep up. The rank-1 users had about 570 followers each, and the server pushed about 108,000 live lines per second. Feed lines fell further and further behind until they left the server about 4 seconds after their tweets, and stayed that late; the server's memory grew to 1.2 GiB while the backlog built up, and the clients sent about 20% fewer requests than their timers call for. All five processes shared the one machine, which had about 14 of its 24 hardware threads busy.
 
 Akka.NET's scheduler works in 10 ms ticks, so short timers fire later than set. The top-ranked users, set to tweet every 10 ms, posted about every 20 ms, and with 2 × 500 users each online user's 0.2 s action timer fired about 4.75 times per second instead of 5.
-
-## Changes since the course submission
-
-The script was updated in 2026 (it was `Project4.fsx`):
-
-- It runs on the .NET 10 SDK, with Akka, Akka.Remote and Akka.FSharp pinned to 1.5.74, and uses Akka.Remote's `dot-netty.tcp` settings.
-- Tweets and retweets now go to the author's followers. They used to go to the accounts the author follows, and were stored in the author's own feed.
-- Follows pick their target with probability proportional to 1 / rank, so follower counts roughly follow the Zipf distribution that the follower caps describe. Follows used to pick users uniformly, which left users of every rank with about the same number of followers.
-- Unfollow removes the followee. Follow refuses repeats and checks the target's follower count against its cap.
-- Users who are offline no longer receive live feed items; the items wait in their feed. A returning user's feed now always arrives before new live items.
-- Online users see new tweets that mention them right away; before, mentions could only be found with a query.
-- Feed, mention and hashtag results list up to 10 tweets (feed and mention results showed one), and a mention query with no results says so.
-- Feeds, hashtag lists and mention lists keep their 100 most recent tweets; they used to grow without limit.
-- Users start tweeting again when they come back online.
-- The client no longer crashes after registering its last user. The crash also stopped the offline/online cycle.
-- A client that starts before the server keeps asking to register every 3 seconds instead of waiting forever.
-- The request count includes only client requests (it also counted the output the server relays to clients), and requests per second are printed.
-- The server's actors are children of ServerActor, which restarts any that fail. The server sends output straight to each client's Printer instead of looking up its address for every message, and clients send their requests straight to ServerActor.
-- Arguments are checked, with a usage message. The first tweet waits for the user's tweet interval. Picking a random other user no longer loops forever when a client has a single user. Extra spaces in a tweet no longer crash the hashtag and mention indexes, and the server ignores messages it does not understand instead of crashing. Follow and unfollow output shows user IDs. The sample hashtags are neutral.
 
 ## Continuous integration
 
